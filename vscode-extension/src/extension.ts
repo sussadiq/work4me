@@ -6,6 +6,11 @@ let wss: WebSocketServer | null = null;
 let outputChannel: vscode.OutputChannel | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
 
+// Claude Code sidebar monitoring state
+let fileChangeCount = 0;
+let lastFileChangeTime = 0;
+let isWatchingClaude = false;
+
 interface Command {
   id: string;
   command: string;
@@ -56,6 +61,22 @@ export function activate(context: vscode.ExtensionContext) {
     );
   });
   context.subscriptions.push(statusCmd);
+
+  // File change listeners for Claude Code sidebar monitoring
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument(() => {
+      if (isWatchingClaude) {
+        fileChangeCount++;
+        lastFileChangeTime = Date.now();
+      }
+    }),
+    vscode.workspace.onDidCreateFiles(() => {
+      if (isWatchingClaude) {
+        fileChangeCount++;
+        lastFileChangeTime = Date.now();
+      }
+    })
+  );
 
   const port = vscode.workspace.getConfiguration('work4me').get<number>('port', 9876);
 
@@ -234,6 +255,55 @@ async function dispatch(cmd: Command): Promise<unknown> {
 
     case 'ping': {
       return { pong: true, timestamp: Date.now() };
+    }
+
+    // Claude Code sidebar commands
+    case 'openClaudeCode': {
+      await vscode.commands.executeCommand('claude-dev.SidebarProvider.focus');
+      return { opened: 'claude-sidebar' };
+    }
+
+    case 'focusClaudeInput': {
+      await vscode.commands.executeCommand('claude-dev.SidebarProvider.focus');
+      return { focused: 'claude-input' };
+    }
+
+    case 'blurClaudeInput': {
+      await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+      return { blurred: 'claude-input' };
+    }
+
+    case 'newClaudeConversation': {
+      await vscode.commands.executeCommand('claude-dev.plusButtonClicked');
+      return { newConversation: true };
+    }
+
+    case 'acceptDiff': {
+      await vscode.commands.executeCommand('claude-dev.acceptDiff');
+      return { accepted: true };
+    }
+
+    case 'rejectDiff': {
+      await vscode.commands.executeCommand('claude-dev.rejectDiff');
+      return { rejected: true };
+    }
+
+    case 'startClaudeWatch': {
+      fileChangeCount = 0;
+      lastFileChangeTime = Date.now();
+      isWatchingClaude = true;
+      return { watching: true };
+    }
+
+    case 'stopClaudeWatch': {
+      isWatchingClaude = false;
+      return { totalChanges: fileChangeCount, lastChangeTimestamp: lastFileChangeTime };
+    }
+
+    case 'getClaudeStatus': {
+      const now = Date.now();
+      const idleMs = lastFileChangeTime > 0 ? now - lastFileChangeTime : now;
+      return { fileChanges: fileChangeCount, lastChangeTimestamp: lastFileChangeTime, idleMs };
     }
 
     default:

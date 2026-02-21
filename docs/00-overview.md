@@ -12,20 +12,22 @@ AI tools like Claude Code can complete engineering tasks in minutes. But remote 
 
 Work4Me operates in two modes:
 
-**Mode A (Manual Developer):** Claude Code runs headless per-activity, Work4Me replays actions visibly in VS Code at human speed. The work is real; the pacing is simulated.
+**Sidebar mode (primary):** Opens the Claude Code VS Code extension sidebar, types prompts with human-like timing via dotool, monitors file changes for completion detection, and reviews/accepts diffs. This is how real developers use AI tools in 2026.
 
-**Mode B (AI-Assisted Developer):** Work4Me types prompts into a visible Claude Code terminal session, reviews output in VS Code. This imitates how developers actually use AI tools in 2026.
+**Manual mode (fallback):** Claude Code runs headless per-activity, Work4Me replays actions visibly in VS Code at human speed. The work is real; the pacing is simulated.
 
 ```
-Mode A:                                    Mode B:
-Claude Code (headless)  Work4Me (visible)  Work4Me types prompts → Claude Code (visible)
-        |                      |                     |                      |
-  Writes auth.ts  -->  Types in VS Code      Types prompt  -->  Claude writes visibly
-  Runs npm test   -->  Types in terminal     Reviews output -->  Scrolls VS Code
-  Plans research  -->  Opens browser         Makes tweaks  -->  Types in VS Code
+Sidebar mode:                              Manual mode:
+Work4Me types in Claude sidebar            Claude Code (headless)  Work4Me (visible)
+        |                                          |                      |
+  Types prompt  -->  Claude works visibly    Writes auth.ts  -->  Types in VS Code
+  Monitors changes   Reviews diffs           Runs npm test   -->  Types in terminal
+  Accepts/rejects    Opens changed files     Plans research  -->  Opens browser
 ```
 
-Both modes use interleaved execution — Claude Code runs per-activity (not batch), enabling real debugging and adaptive behavior. Cost: zero per-invocation (Claude Code Max plan).
+Both modes use interleaved execution — Claude Code runs per-activity (not batch), enabling real debugging and adaptive behavior. Sidebar mode falls back to manual mode on error. Cost: zero per-invocation (Claude Code Max plan).
+
+Work sessions use micro-pauses (15-60 second natural pauses) instead of formal 5-8 minute breaks, producing more organic-looking activity patterns.
 
 ## What It Must Do
 
@@ -51,10 +53,10 @@ Both modes use interleaved execution — Claude Code runs per-activity (not batc
 |---|---|---|
 | Language | Python 3.11+ with asyncio | Best D-Bus, desktop automation, terminal control ecosystem |
 | Input simulation | ydotool/dotool (universal) + RemoteDesktop portal (GNOME) | Only universal Wayland input methods |
-| AI engine | Claude Code CLI (headless + interactive modes) | stream-json for both input and output |
+| AI engine | Claude Code CLI (headless) + VS Code extension sidebar | stream-json for headless, extension bridge for sidebar |
 | IDE | VS Code + custom WebSocket extension | Universal screenshot credibility, precise programmatic control |
 | Terminal | VS Code integrated terminal + tmux fallback | Visible terminal commands |
-| Browser | Chromium via CDP/Playwright | `--remote-debugging-port` + visible window |
+| Browser | Firefox via Playwright | Visible window, managed context |
 | Distribution | Tarball + install script | Flatpak/Snap blocked by sandbox |
 
 ## Document Index

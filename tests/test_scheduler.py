@@ -25,10 +25,9 @@ def plan(activities):
 def scheduler():
     return Scheduler(SessionConfig())
 
-def test_build_schedule_creates_sessions(scheduler, plan):
+def test_build_schedule_creates_single_session(scheduler, plan):
     schedule = scheduler.build_schedule(plan, total_minutes=240)
-    assert len(schedule.sessions) >= 2
-    assert len(schedule.sessions) <= 5
+    assert len(schedule.sessions) == 1
 
 def test_schedule_covers_all_activities(scheduler, plan):
     schedule = scheduler.build_schedule(plan, total_minutes=240)
@@ -37,10 +36,10 @@ def test_schedule_covers_all_activities(scheduler, plan):
         all_activities.extend(session.activities)
     assert len(all_activities) == len(plan.activities)
 
-def test_sessions_have_breaks(scheduler, plan):
+def test_sessions_have_no_breaks(scheduler, plan):
     schedule = scheduler.build_schedule(plan, total_minutes=240)
-    for session in schedule.sessions[:-1]:  # all but last
-        assert session.break_after_minutes > 0
+    for session in schedule.sessions:
+        assert session.break_after_minutes == 0.0
 
 def test_schedule_respects_dependencies(scheduler, plan):
     schedule = scheduler.build_schedule(plan, total_minutes=240)
@@ -58,12 +57,10 @@ def test_total_time_within_budget(scheduler, plan):
     assert total <= 320  # generous slack — schedule is approximate, not exact
 
 
-def test_schedule_uses_session_config_values(plan):
-    """Custom SessionConfig should affect session count and durations."""
-    config = SessionConfig(duration_mean=30, duration_sigma=3, break_mean=5,
-                           break_sigma=1, sessions_per_4_hours=6)
+def test_schedule_single_session_covers_budget(plan):
+    """Single session should cover the full time budget."""
+    config = SessionConfig()
     scheduler = Scheduler(config)
     schedule = scheduler.build_schedule(plan, total_minutes=240)
-    # With sessions_per_4_hours=6, expect ~6 sessions
-    assert len(schedule.sessions) >= 4
-    assert len(schedule.sessions) <= 6
+    assert len(schedule.sessions) == 1
+    assert schedule.sessions[0].duration_minutes >= 240

@@ -15,7 +15,6 @@ class State(str, Enum):
     INITIALIZING = "INITIALIZING"
     PLANNING = "PLANNING"
     WORKING = "WORKING"
-    ON_BREAK = "ON_BREAK"
     PAUSED = "PAUSED"
     WRAPPING_UP = "WRAPPING_UP"
     COMPLETED = "COMPLETED"
@@ -38,18 +37,12 @@ TRANSITIONS: dict[State, dict[str, State]] = {
         "user_pause": State.PAUSED,
     },
     State.WORKING: {
-        "break_scheduled": State.ON_BREAK,
         "time_almost_up": State.WRAPPING_UP,
         "task_complete_early": State.WRAPPING_UP,
         "user_pause": State.PAUSED,
         "user_interrupt": State.INTERRUPTED,
         "error": State.ERROR,
         "replan_needed": State.PLANNING,
-    },
-    State.ON_BREAK: {
-        "break_over": State.WORKING,
-        "user_pause": State.PAUSED,
-        "time_almost_up": State.WRAPPING_UP,
     },
     State.PAUSED: {
         "user_resume": State.WORKING,
@@ -127,7 +120,7 @@ class StateSnapshot:
 
     def is_resumable(self) -> bool:
         """Check if this snapshot represents a session that can be resumed."""
-        resumable_states = {State.WORKING.value, State.PLANNING.value, State.ON_BREAK.value, State.PAUSED.value}
+        resumable_states = {State.WORKING.value, State.PLANNING.value, State.PAUSED.value}
         return self.state in resumable_states and bool(self.task_description)
 
     def save(self, path: Path) -> None:

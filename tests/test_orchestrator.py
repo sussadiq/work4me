@@ -22,7 +22,7 @@ def orchestrator(config):
 
 
 def test_orchestrator_has_mode(orchestrator):
-    assert orchestrator._mode in ("manual", "ai-assisted")
+    assert orchestrator._mode in ("sidebar", "manual")
 
 
 def test_orchestrator_has_vscode_controller(orchestrator):
@@ -208,34 +208,66 @@ async def test_run_resumes_from_recovery():
 
 
 @pytest.mark.asyncio
-async def test_ai_assisted_prompt_is_shell_escaped(orchestrator):
-    """Shell metacharacters in prompt must be escaped."""
+async def test_default_mode_is_sidebar():
+    """Config default mode should be 'sidebar'."""
+    config = Config()
+    assert config.mode == "sidebar"
+    orch = Orchestrator(config)
+    assert orch._mode == "sidebar"
+
+
+@pytest.mark.asyncio
+async def test_execute_coding_sidebar_mode():
+    """Sidebar mode should call sidebar bridge methods."""
+    config = Config(mode="sidebar")
+    orch = Orchestrator(config)
     activity = Activity(
         ActivityKind.CODING, "Write auth", 20,
         ["src/auth.ts"], [], [], [],
     )
-    orchestrator._mode = "ai-assisted"
-    orchestrator._vscode = AsyncMock()
-    orchestrator._behavior = AsyncMock()
-    orchestrator._window_mgr = AsyncMock()
-    orchestrator._activity_monitor = MagicMock()
+    orch._vscode = AsyncMock()
+    orch._vscode.is_claude_busy = AsyncMock(return_value=False)
+    orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 3})
+    orch._behavior = AsyncMock()
+    orch._window_mgr = AsyncMock()
+    orch._input_sim = AsyncMock()
+    orch._input_sim.health_check = AsyncMock(return_value=True)
+    orch._activity_monitor = MagicMock()
+    orch.snapshot.working_dir = "/tmp"
 
-    prompt_with_injection = "'; rm -rf / #"
-    orchestrator._build_activity_prompt = MagicMock(return_value=prompt_with_injection)
+    await orch._execute_coding_sidebar(activity, "/tmp")
 
-    await orchestrator._execute_coding_ai_assisted(activity, working_dir="/tmp")
+    orch._vscode.open_claude_sidebar.assert_called_once()
+    orch._vscode.new_claude_conversation.assert_called_once()
+    orch._vscode.focus_claude_input.assert_called_once()
+    orch._vscode.start_claude_watch.assert_called_once()
+    orch._vscode.stop_claude_watch.assert_called_once()
 
-    # Find the call to run_terminal_command that has the claude command
-    for c in orchestrator._vscode.run_terminal_command.call_args_list:
-        cmd_arg = c[0][0]
-        if "claude" in cmd_arg:
-            # Must contain the shlex-quoted version (safely escaped)
-            assert shlex.quote(prompt_with_injection[:200]) in cmd_arg
-            # Must NOT use bare double-quote wrapping (the old vulnerable pattern)
-            assert f'"{prompt_with_injection[:200]}"' not in cmd_arg
-            break
-    else:
-        pytest.fail("run_terminal_command was not called with a claude command")
+
+@pytest.mark.asyncio
+async def test_sidebar_falls_back_to_manual_on_error():
+    """When sidebar fails, should fall back to manual mode."""
+    config = Config(mode="sidebar")
+    orch = Orchestrator(config)
+    activity = Activity(
+        ActivityKind.CODING, "Write auth", 20,
+        ["src/auth.ts"], [], [], [],
+    )
+    orch._vscode = AsyncMock()
+    orch._vscode.open_claude_sidebar = AsyncMock(side_effect=RuntimeError("Extension not available"))
+    orch._claude = AsyncMock()
+    orch._claude.execute = AsyncMock(return_value=MagicMock(
+        actions=[], raw_text="done", exit_code=0, error=None
+    ))
+    orch._behavior = AsyncMock()
+    orch._window_mgr = AsyncMock()
+    orch._input_sim = AsyncMock()
+    orch._activity_monitor = MagicMock()
+    orch.snapshot.working_dir = "/tmp"
+
+    await orch._execute_coding_sidebar(activity, "/tmp")
+    # Should have fallen back to manual — Claude headless should be called
+    orch._claude.execute.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -387,20 +419,24 @@ async def test_coding_manual_focuses_vscode_window(orchestrator):
 
 
 @pytest.mark.asyncio
-async def test_coding_ai_assisted_focuses_vscode_window(orchestrator):
-    """_execute_coding_ai_assisted should focus the VS Code window."""
+async def test_coding_sidebar_focuses_vscode_window(orchestrator):
+    """_execute_coding_sidebar should focus the VS Code window."""
     activity = Activity(
         ActivityKind.CODING, "Write auth", 20,
         ["src/auth.ts"], [], [], [],
     )
-    orchestrator._mode = "ai-assisted"
+    orchestrator._mode = "sidebar"
     orchestrator._vscode = AsyncMock()
+    orchestrator._vscode.is_claude_busy = AsyncMock(return_value=False)
+    orchestrator._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
     orchestrator._behavior = AsyncMock()
     orchestrator._window_mgr = AsyncMock()
+    orchestrator._input_sim = AsyncMock()
+    orchestrator._input_sim.health_check = AsyncMock(return_value=True)
     orchestrator._activity_monitor = MagicMock()
 
     orchestrator.snapshot.working_dir = "/tmp"
-    await orchestrator._execute_coding_ai_assisted(activity, "/tmp")
+    await orchestrator._execute_coding_sidebar(activity, "/tmp")
     orchestrator._window_mgr.focus_window.assert_called_once_with(
         "code", title_hint="tmp",
     )

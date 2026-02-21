@@ -41,9 +41,16 @@ class ActivityConfig:
 class SessionConfig:
     duration_mean: float = 52.0
     duration_sigma: float = 5.0
-    break_mean: float = 6.5
-    break_sigma: float = 1.5
-    sessions_per_4_hours: int = 4
+    break_mean: float = 0.0
+    break_sigma: float = 0.0
+    sessions_per_4_hours: int = 1
+
+
+@dataclass
+class MicroPauseConfig:
+    min_seconds: float = 15.0
+    max_seconds: float = 60.0
+    frequency_per_activity: float = 0.3
 
 
 @dataclass
@@ -93,8 +100,9 @@ class Config:
     desktop: DesktopConfig = field(default_factory=DesktopConfig)
     vscode: VSCodeConfig = field(default_factory=VSCodeConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
+    micro_pause: MicroPauseConfig = field(default_factory=MicroPauseConfig)
 
-    mode: str = "manual"  # "manual" or "ai-assisted"
+    mode: str = "sidebar"  # "sidebar" or "manual"
     default_hours: float = 4.0
     working_dir: str = "."
     log_level: str = "INFO"

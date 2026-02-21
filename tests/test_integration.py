@@ -69,17 +69,21 @@ async def test_full_flow_mode_a(mock_schedule):
 
 
 @pytest.mark.asyncio
-async def test_full_flow_mode_b(mock_schedule):
-    config = Config(mode="ai-assisted")
+async def test_full_flow_sidebar_mode(mock_schedule):
+    config = Config(mode="sidebar")
     orch = Orchestrator(config)
 
     # Mock all external controllers
     orch._vscode = AsyncMock()
+    orch._vscode.is_claude_busy = AsyncMock(return_value=False)
+    orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 2})
     orch._browser_ctrl = AsyncMock()
     behavior_mock = AsyncMock()
     behavior_mock.apply_adjustment = MagicMock()  # sync method
     orch._behavior = behavior_mock
     orch._claude = AsyncMock()
+    orch._input_sim = AsyncMock()
+    orch._input_sim.health_check = AsyncMock(return_value=True)
     orch._planner = AsyncMock()
     orch._planner.decompose = AsyncMock(return_value=TaskPlan(
         "Test task", mock_schedule.sessions[0].activities
@@ -99,8 +103,8 @@ async def test_full_flow_mode_b(mock_schedule):
     await orch.run("Test task", time_budget_minutes=30, working_dir="/tmp")
 
     orch._initialize.assert_called_once()
-    # Mode B should use VS Code terminal, not headless Claude
-    orch._vscode.show_terminal.assert_called()
+    # Sidebar mode should open the Claude sidebar for coding activities
+    orch._vscode.open_claude_sidebar.assert_called()
     orch._cleanup.assert_called_once()
 
 

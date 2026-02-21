@@ -151,24 +151,36 @@ class BehaviorEngine:
                     cfg.idle_micro_movement_max,
                 )
 
-    async def take_break(self, duration_seconds: float) -> None:
-        """Simulate a break — very minimal activity.
+    async def micro_pause(
+        self, min_sec: float | None = None, max_sec: float | None = None,
+    ) -> None:
+        """Insert a natural micro-pause (15-60s) with mouse micro-movements.
 
-        Occasional tiny mouse movement every 3-4 minutes to avoid
-        triggering 5-minute idle thresholds.
+        Replaces formal breaks with organic pauses that keep time
+        trackers active while simulating brief human pauses (stretching,
+        reading, sipping coffee).
         """
-        logger.info("Taking break for %.0f seconds", duration_seconds)
+        cfg = self.config.micro_pause
+        lo = min_sec if min_sec is not None else cfg.min_seconds
+        hi = max_sec if max_sec is not None else cfg.max_seconds
+        duration = random.uniform(lo, hi)
+        logger.info("Micro-pause for %.0f seconds", duration)
+
         elapsed = 0.0
-
-        while elapsed < duration_seconds:
-            # Wait 3-4 minutes between micro-movements during break
-            interval = random.uniform(180, 240)
-            wait = min(interval, duration_seconds - elapsed)
-            await asyncio.sleep(wait)
+        while elapsed < duration:
+            interval = random.uniform(8, 20)
+            wait = min(interval, duration - elapsed)
+            await asyncio.sleep(self._apply_speed(wait))
             elapsed += wait
-
-            if elapsed < duration_seconds:
+            if elapsed < duration:
                 self._record_event("mouse_micro")
+
+    async def take_break(self, duration_seconds: float) -> None:
+        """Simulate a break — delegates to micro_pause for backward compat."""
+        await self.micro_pause(
+            min_sec=duration_seconds * 0.8,
+            max_sec=duration_seconds * 1.2,
+        )
 
     async def pause_natural(self, min_sec: float = 0.5, max_sec: float = 3.0) -> None:
         """Insert a natural pause between actions."""

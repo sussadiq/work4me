@@ -143,6 +143,83 @@ async def test_connect_exponential_backoff(controller):
 
 
 @pytest.mark.asyncio
+async def test_open_claude_sidebar(controller):
+    controller.send_command = AsyncMock(return_value={"opened": "claude-sidebar"})
+    await controller.open_claude_sidebar()
+    controller.send_command.assert_called_with("openClaudeCode")
+
+
+@pytest.mark.asyncio
+async def test_focus_claude_input(controller):
+    controller.send_command = AsyncMock(return_value={"focused": "claude-input"})
+    await controller.focus_claude_input()
+    controller.send_command.assert_called_with("focusClaudeInput")
+
+
+@pytest.mark.asyncio
+async def test_blur_claude_input(controller):
+    controller.send_command = AsyncMock(return_value={"blurred": "claude-input"})
+    await controller.blur_claude_input()
+    controller.send_command.assert_called_with("blurClaudeInput")
+
+
+@pytest.mark.asyncio
+async def test_new_claude_conversation(controller):
+    controller.send_command = AsyncMock(return_value={"newConversation": True})
+    await controller.new_claude_conversation()
+    controller.send_command.assert_called_with("newClaudeConversation")
+
+
+@pytest.mark.asyncio
+async def test_accept_diff(controller):
+    controller.send_command = AsyncMock(return_value={"accepted": True})
+    await controller.accept_diff()
+    controller.send_command.assert_called_with("acceptDiff")
+
+
+@pytest.mark.asyncio
+async def test_reject_diff(controller):
+    controller.send_command = AsyncMock(return_value={"rejected": True})
+    await controller.reject_diff()
+    controller.send_command.assert_called_with("rejectDiff")
+
+
+@pytest.mark.asyncio
+async def test_start_claude_watch(controller):
+    controller.send_command = AsyncMock(return_value={"watching": True})
+    await controller.start_claude_watch()
+    controller.send_command.assert_called_with("startClaudeWatch")
+
+
+@pytest.mark.asyncio
+async def test_stop_claude_watch(controller):
+    controller.send_command = AsyncMock(return_value={"totalChanges": 5, "lastChangeTimestamp": 1234})
+    result = await controller.stop_claude_watch()
+    controller.send_command.assert_called_with("stopClaudeWatch")
+    assert result["totalChanges"] == 5
+
+
+@pytest.mark.asyncio
+async def test_get_claude_status(controller):
+    controller.send_command = AsyncMock(return_value={"fileChanges": 3, "idleMs": 2000})
+    result = await controller.get_claude_status()
+    controller.send_command.assert_called_with("getClaudeStatus")
+    assert result["fileChanges"] == 3
+
+
+@pytest.mark.asyncio
+async def test_is_claude_busy_when_active(controller):
+    controller.send_command = AsyncMock(return_value={"idleMs": 1000})
+    assert await controller.is_claude_busy(idle_threshold_ms=5000) is True
+
+
+@pytest.mark.asyncio
+async def test_is_claude_busy_when_idle(controller):
+    controller.send_command = AsyncMock(return_value={"idleMs": 10000})
+    assert await controller.is_claude_busy(idle_threshold_ms=5000) is False
+
+
+@pytest.mark.asyncio
 async def test_connect_logs_at_info_level(controller):
     """connect() should log retries at INFO level."""
     mock_ws_module = MagicMock()

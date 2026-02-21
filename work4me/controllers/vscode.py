@@ -163,3 +163,48 @@ class VSCodeController:
         if self._ws:
             await self._ws.close()
             self._ws = None
+
+    # ------------------------------------------------------------------
+    # Claude Code sidebar commands
+    # ------------------------------------------------------------------
+
+    async def open_claude_sidebar(self) -> None:
+        """Open the Claude Code sidebar in VS Code."""
+        await self.send_command("openClaudeCode")
+
+    async def focus_claude_input(self) -> None:
+        """Focus the Claude Code input box."""
+        await self.send_command("focusClaudeInput")
+
+    async def blur_claude_input(self) -> None:
+        """Remove focus from the Claude Code input box."""
+        await self.send_command("blurClaudeInput")
+
+    async def new_claude_conversation(self) -> None:
+        """Start a new Claude Code conversation."""
+        await self.send_command("newClaudeConversation")
+
+    async def accept_diff(self) -> None:
+        """Accept the currently proposed diff in Claude Code."""
+        await self.send_command("acceptDiff")
+
+    async def reject_diff(self) -> None:
+        """Reject the currently proposed diff in Claude Code."""
+        await self.send_command("rejectDiff")
+
+    async def start_claude_watch(self) -> None:
+        """Start monitoring file changes from Claude Code activity."""
+        await self.send_command("startClaudeWatch")
+
+    async def stop_claude_watch(self) -> dict[str, Any]:
+        """Stop monitoring and return change summary."""
+        return await self.send_command("stopClaudeWatch")
+
+    async def get_claude_status(self) -> dict[str, Any]:
+        """Get current Claude Code activity status."""
+        return await self.send_command("getClaudeStatus")
+
+    async def is_claude_busy(self, idle_threshold_ms: int = 5000) -> bool:
+        """Check if Claude Code is still actively making changes."""
+        status = await self.get_claude_status()
+        return int(status.get("idleMs", idle_threshold_ms + 1)) < idle_threshold_ms

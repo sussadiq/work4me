@@ -9,14 +9,14 @@ from work4me.config import Config
 
 def test_start_accepts_mode_flag():
     parser = build_parser()
-    args = parser.parse_args(["start", "--task", "Build API", "--hours", "4", "--mode", "ai-assisted"])
-    assert args.mode == "ai-assisted"
+    args = parser.parse_args(["start", "--task", "Build API", "--hours", "4", "--mode", "manual"])
+    assert args.mode == "manual"
 
 
-def test_start_default_mode_is_manual():
+def test_start_default_mode_is_sidebar():
     parser = build_parser()
     args = parser.parse_args(["start", "--task", "Build API", "--hours", "4"])
-    assert args.mode == "manual"
+    assert args.mode == "sidebar"
 
 
 def test_start_accepts_working_dir():
@@ -35,10 +35,10 @@ def test_start_accepts_config_flag():
 async def test_cmd_start_uses_load_config(tmp_path):
     """cmd_start should call load_config when --config is provided."""
     toml_file = tmp_path / "config.toml"
-    toml_file.write_text('mode = "ai-assisted"\n')
+    toml_file.write_text('mode = "sidebar"\n')
 
     with patch("work4me.cli.load_config") as mock_load:
-        mock_config = Config(mode="ai-assisted")
+        mock_config = Config(mode="sidebar")
         mock_load.return_value = mock_config
         with patch("work4me.cli.Orchestrator") as MockOrch:
             MockOrch.return_value.run = AsyncMock()

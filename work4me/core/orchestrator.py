@@ -6,13 +6,15 @@ human-paced work.
 
 Dual-Mode Architecture
 ----------------------
-Mode A (Manual Developer):
+Sidebar mode (primary):
+  Opens the Claude Code VS Code extension sidebar, types prompts with
+  human-like timing via dotool, monitors file changes for completion
+  detection, and reviews/accepts diffs. Falls back to manual mode on
+  error.
+
+Manual mode (fallback):
   Claude Code runs headless per-activity, Work4Me replays actions visibly
   in VS Code at human speed. The work is real; the pacing is simulated.
-
-Mode B (AI-Assisted Developer):
-  Work4Me types prompts into a visible Claude Code terminal session,
-  reviews output in VS Code. Imitates how developers use AI tools.
 
 Both modes use interleaved execution — Claude Code runs per-activity
 (not batch), enabling real debugging and adaptive behavior.
@@ -36,6 +38,7 @@ from work4me.controllers.claude_code import ActionKind, CapturedAction, ClaudeCo
 from work4me.controllers.vscode import VSCodeController
 from work4me.core.events import EventBus, StateChanged, TaskProgress
 from work4me.core.state import State, StateMachine, StateSnapshot
+from work4me.desktop.input_sim import DotoolInput, detect_input_method
 from work4me.desktop.window_mgr import detect_window_manager
 from work4me.planning.scheduler import Schedule, Scheduler, WorkSession
 from work4me.planning.task_planner import Activity, ActivityKind, TaskPlan, TaskPlanner
@@ -67,6 +70,9 @@ class Orchestrator:
 
         # Window management
         self._window_mgr = detect_window_manager()
+
+        # Input simulation (dotool/ydotool for real keystrokes)
+        self._input_sim: DotoolInput = detect_input_method()
 
         # Activity monitor
         self._activity_monitor = ActivityMonitor(config.activity)
@@ -133,11 +139,9 @@ class Orchestrator:
                 start_idx = self.snapshot.current_activity_index if (recovered and si == 0) else 0
                 await self._execute_session(session, working_dir, activity_start_index=start_idx)
 
-                # Break between sessions
-                if session.break_after_minutes > 0:
-                    self._transition("break_scheduled")
-                    await self._take_break(session.break_after_minutes)
-                    self._transition("break_over")
+                # Micro-pause between sessions (no formal breaks)
+                if si < len(schedule.sessions) - 1:
+                    await self._behavior.micro_pause()
 
             # WRAPPING_UP
             if self.state_machine.can_transition("task_complete_early"):
@@ -369,10 +373,10 @@ class Orchestrator:
         )
 
         if activity.kind == ActivityKind.CODING:
-            if self._mode == "manual":
+            if self._mode == "sidebar":
+                await self._execute_coding_sidebar(activity, working_dir)
+            else:  # "manual" fallback
                 await self._execute_coding_manual(activity, working_dir)
-            else:
-                await self._execute_coding_ai_assisted(activity, working_dir)
         elif activity.kind == ActivityKind.BROWSER:
             await self._execute_browser(activity)
         elif activity.kind == ActivityKind.TERMINAL:
@@ -469,43 +473,130 @@ class Orchestrator:
                 await asyncio.sleep(2.0)
 
     # ------------------------------------------------------------------
-    # Mode B: AI-Assisted Developer
+    # Sidebar mode: Claude Code VS Code extension
     # ------------------------------------------------------------------
 
-    async def _execute_coding_ai_assisted(self, activity: Activity, working_dir: str) -> None:
-        """Mode B: type prompts into visible Claude Code terminal session."""
+    async def _execute_coding_sidebar(self, activity: Activity, working_dir: str) -> None:
+        """Sidebar mode: drive the Claude Code VS Code extension sidebar.
+
+        Opens the sidebar, types the prompt with human-like timing,
+        monitors file changes for completion, and reviews/accepts diffs.
+        Falls back to manual mode on any error.
+        """
+        try:
+            await self._execute_coding_sidebar_inner(activity, working_dir)
+        except Exception as exc:
+            logger.warning(
+                "Sidebar mode failed, falling back to manual: %s", exc,
+            )
+            await self._execute_coding_manual(activity, working_dir)
+
+    async def _execute_coding_sidebar_inner(
+        self, activity: Activity, working_dir: str,
+    ) -> None:
+        """Inner sidebar execution (raises on failure for fallback)."""
         await self._focus_app_window(
             self.config.vscode.window_class, title_hint=self._vscode_title_hint(),
         )
         prompt = self._build_activity_prompt(activity)
 
-        # Type the prompt into the VS Code terminal (visible Claude Code session)
-        await self._vscode.show_terminal()
+        # 1. Open Claude Code sidebar and start a new conversation
+        await self._vscode.open_claude_sidebar()
+        await asyncio.sleep(1.0)
+        await self._vscode.new_claude_conversation()
         await asyncio.sleep(0.5)
 
-        # Type "claude" command to invoke Claude Code visibly
-        claude_cmd = f"claude -p {shlex.quote(prompt[:200])}"
-        await self._vscode.run_terminal_command(claude_cmd)
+        # 2. Focus input and type prompt with human-like timing
+        await self._vscode.focus_claude_input()
+        await asyncio.sleep(0.3)
+        await self._type_prompt_human_like(prompt)
 
-        # Wait for Claude to work (estimated time for the activity)
-        wait_seconds = min(activity.estimated_minutes * 60 * 0.5, 120)
-        await self._behavior.idle_think(wait_seconds)
+        # 3. Start file change monitoring
+        await self._vscode.start_claude_watch()
 
-        # Review output in editor
-        await self._vscode.focus_editor()
-        await asyncio.sleep(1.0)
+        # 4. Press Enter to submit the prompt
+        if await self._input_sim.health_check():
+            await self._input_sim.type_key("Return")
+        else:
+            # Fallback: use bridge to type a newline
+            await self._vscode.type_text("\n")
 
-        # Open files that were involved
+        # 5. Wait for Claude to finish (poll file change quiescence)
+        await self._wait_for_claude_completion(activity)
+
+        # 6. Stop monitoring and log results
+        watch_result = await self._vscode.stop_claude_watch()
+        total_changes = watch_result.get("totalChanges", 0)
+        logger.info("Claude sidebar completed: %d file changes", total_changes)
+
+        # 7. Review and accept diffs
+        await self._review_and_accept_diffs()
+
+        # 8. Open changed files for visual review
         for file_path in activity.files_involved[:3]:
             resolved = self._resolve_activity_path(file_path)
             if resolved is None or not Path(resolved).exists():
-                logger.debug("Skipping non-existent file: %s", file_path)
                 continue
             try:
                 await self._vscode.open_file(resolved)
                 await asyncio.sleep(2.0)
             except Exception as exc:
                 logger.warning("Failed to open file %s: %s", resolved, exc)
+
+    async def _type_prompt_human_like(self, prompt: str) -> None:
+        """Type prompt using dotool for real keystrokes, or bridge as fallback."""
+        if await self._input_sim.health_check():
+            await self._behavior.type_text(
+                prompt,
+                send_char_fn=self._input_sim.type_char,
+                is_code=False,
+            )
+        else:
+            await self._vscode.type_text(prompt)
+
+    async def _wait_for_claude_completion(self, activity: Activity) -> None:
+        """Poll file change status until Claude appears idle."""
+        max_wait = min(activity.estimated_minutes * 60 * 0.8, 300)
+        idle_threshold_ms = 5000
+        poll_interval = 3.0
+        elapsed = 0.0
+
+        logger.info(
+            "Waiting for Claude completion (max %.0fs, idle threshold %dms)",
+            max_wait, idle_threshold_ms,
+        )
+
+        while elapsed < max_wait:
+            await self._behavior.idle_think(poll_interval)
+            elapsed += poll_interval
+
+            try:
+                busy = await self._vscode.is_claude_busy(
+                    idle_threshold_ms=idle_threshold_ms,
+                )
+                if not busy:
+                    logger.info("Claude appears idle after %.0fs", elapsed)
+                    return
+            except Exception:
+                pass  # Connection hiccup, keep waiting
+
+        logger.info("Claude wait timed out after %.0fs", max_wait)
+
+    async def _review_and_accept_diffs(self) -> None:
+        """Simulate human diff review: pause, then accept (95%) or reject (5%)."""
+        review_pause = random.uniform(2.0, 8.0)
+        await self._behavior.idle_think(review_pause)
+
+        try:
+            if random.random() < 0.95:
+                await self._vscode.accept_diff()
+                logger.info("Accepted diff after %.1fs review", review_pause)
+            else:
+                await self._vscode.reject_diff()
+                logger.info("Rejected diff after %.1fs review (realism)", review_pause)
+        except Exception as exc:
+            # No pending diff is fine — Claude may not have proposed one
+            logger.debug("Diff action failed (likely no pending diff): %s", exc)
 
     # ------------------------------------------------------------------
     # Browser activity
@@ -647,10 +738,6 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # Break and wrap-up
     # ------------------------------------------------------------------
-
-    async def _take_break(self, duration_minutes: float) -> None:
-        """Simulate break with minimal activity."""
-        await self._behavior.take_break(duration_minutes * 60)
 
     async def _wrap_up(self, working_dir: str) -> None:
         """Git commit and final cleanup."""

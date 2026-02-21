@@ -23,11 +23,12 @@ work4me (main daemon)                     # Python asyncio, single process
 
 | From → To | Mechanism |
 |---|---|
-| Daemon ↔ Claude CLI | stdin/stdout pipes, stream-json parsing |
+| Daemon ↔ Claude CLI | stdin/stdout pipes, stream-json parsing (manual mode) |
 | Daemon ↔ VS Code | WebSocket (work4me-bridge extension, port 9876) |
+| Daemon ↔ Claude Code extension | Via VS Code bridge commands (sidebar mode) |
 | Daemon ↔ Browser | Playwright `firefox.launch_persistent_context` (managed) |
 | Daemon ↔ Desktop | D-Bus via `dbus_next` (RemoteDesktop portal) |
-| Daemon ↔ ydotool | Subprocess calls (fallback input method) |
+| Daemon ↔ dotool/ydotool | Subprocess calls (keyboard input for sidebar mode) |
 | CLI ↔ Daemon | Unix socket at `$XDG_RUNTIME_DIR/work4me/daemon.sock` |
 
 ## Socket / File Layout
@@ -85,7 +86,7 @@ work4me/
 ## Module Responsibilities
 
 ### `core/orchestrator.py` — Orchestrator
-The brain. Runs the main asyncio event loop and state machine. Supports dual operating modes: Mode A (Manual Developer — headless Claude, replay in VS Code) and Mode B (AI-Assisted Developer — type prompts into visible Claude Code). Uses interleaved per-activity execution.
+The brain. Runs the main asyncio event loop and state machine. Supports dual operating modes: Sidebar mode (primary — drives Claude Code VS Code extension sidebar with human-like typing) and Manual mode (fallback — headless Claude, replay in VS Code). Uses interleaved per-activity execution.
 
 ```python
 class Orchestrator:
@@ -217,18 +218,17 @@ class Controller(Protocol):
 IDLE ---> INITIALIZING ---> WORKING ---> WRAPPING_UP ---> COMPLETED
   ^          |                 |              |
   |          v                 v              v
-  +------ PAUSED <-------  ON_BREAK     INTERRUPTED
-  |                           |
-  +------ ERROR <-------------+
+  +------ PAUSED <-------  INTERRUPTED    ERROR
 ```
+
+Note: The ON_BREAK state has been removed. Work sessions use organic micro-pauses (15-60 seconds) between activities instead of formal breaks, producing more natural-looking activity patterns.
 
 | State | Description | Active Modules |
 |---|---|---|
 | `IDLE` | Daemon running, no task. Waiting for CLI command. | CLI listener |
-| `INITIALIZING` | Launching tmux, editor, browser. Establishing portal sessions. | DesktopController, all Controllers |
+| `INITIALIZING` | Launching VS Code, browser. Connecting controllers. | DesktopController, all Controllers |
 | `PLANNING` | Claude Code decomposes task. Scheduler builds timeline. | ClaudeCodeManager, TaskPlanner, Scheduler |
-| `WORKING` | Executing micro-actions: typing, commands, browsing. | All controllers, BehaviorEngine, ActivityMonitor |
-| `ON_BREAK` | Simulating developer break. Minimal input. | BehaviorEngine (idle mode) |
+| `WORKING` | Executing activities: sidebar prompts, typing, commands, browsing. | All controllers, BehaviorEngine, ActivityMonitor |
 | `PAUSED` | User manually paused. All activity stops. | CLI listener only |
 | `WRAPPING_UP` | <10 min remaining. Committing work, final cleanup. | TerminalController (git commit) |
 | `COMPLETED` | Done. Report generated. Transition to IDLE. | None |
@@ -242,10 +242,9 @@ TRANSITIONS = {
     IDLE:          {"start_task": INITIALIZING},
     INITIALIZING:  {"setup_complete": PLANNING, "setup_failed": ERROR},
     PLANNING:      {"plan_ready": WORKING, "plan_failed": ERROR, "user_pause": PAUSED},
-    WORKING:       {"break_scheduled": ON_BREAK, "time_almost_up": WRAPPING_UP,
+    WORKING:       {"time_almost_up": WRAPPING_UP,
                     "task_complete_early": WRAPPING_UP, "user_pause": PAUSED,
                     "user_interrupt": INTERRUPTED, "error": ERROR, "replan_needed": PLANNING},
-    ON_BREAK:      {"break_over": WORKING, "user_pause": PAUSED, "time_almost_up": WRAPPING_UP},
     PAUSED:        {"user_resume": WORKING, "user_stop": WRAPPING_UP},
     WRAPPING_UP:   {"wrapped_up": COMPLETED, "error": ERROR},
     INTERRUPTED:   {"user_gone": WORKING, "user_pause": PAUSED, "timeout": PAUSED},
@@ -268,7 +267,31 @@ PICKING_ACTIVITY -> EXECUTING_MICRO_ACTION -> (loop) -> ACTIVITY_DONE
 
 ## Core Data Flow
 
-### Mode A (Manual Developer)
+### Sidebar Mode (Primary)
+```
+1. Scheduler picks next activity: "Write auth middleware"
+       |
+2. VSCodeController.open_claude_sidebar()
+3. VSCodeController.new_claude_conversation()
+4. VSCodeController.focus_claude_input()
+       |
+5. BehaviorEngine.type_text(prompt) via dotool
+       |  (human-like keystrokes in Claude Code sidebar)
+       |
+6. VSCodeController.start_claude_watch()
+7. input_sim.type_key("Return")  →  Claude starts working
+       |
+8. Poll VSCodeController.is_claude_busy() until idle (5s threshold)
+       |
+9. VSCodeController.stop_claude_watch()  →  log file changes
+       |
+10. Review diffs (2-8s pause), then accept_diff() or reject_diff()
+       |
+11. Open changed files for visual review
+12. ActivityMonitor records events, adjusts pacing
+```
+
+### Manual Mode (Fallback)
 ```
 1. Scheduler picks next activity: "Write auth middleware"
        |
@@ -287,21 +310,6 @@ PICKING_ACTIVITY -> EXECUTING_MICRO_ACTION -> (loop) -> ACTIVITY_DONE
        |  a. VSCodeController.run_terminal_command("npm test")
        |
 6. ActivityMonitor records events, adjusts pacing
-```
-
-### Mode B (AI-Assisted Developer)
-```
-1. Scheduler picks next activity: "Write auth middleware"
-       |
-2. VSCodeController.show_terminal()
-3. VSCodeController.run_terminal_command("claude -p 'prompt'")
-       |  (visible Claude Code session in VS Code terminal)
-       |
-4. idle_think() while Claude works visibly
-       |
-5. VSCodeController.focus_editor() → review output files
-       |
-6. ActivityMonitor records events
 ```
 
 ## Feedback Loops

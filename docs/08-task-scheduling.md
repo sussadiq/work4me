@@ -82,29 +82,24 @@ class Scheduler:
     def build_schedule(self, activities: list[Activity], time_budget: TimeBudget) -> Schedule:
         """
         Creates:
-        - 4 work sessions of variable length
-        - Breaks between sessions
-        - Activities distributed across sessions
-        - Gaussian noise on all durations
+        - Single continuous work session covering the full budget
+        - No formal breaks (micro-pauses between activities instead)
+        - All activities packed into one session
         """
 ```
 
-**Optimal session lengths** (from research):
-- Classic Pomodoro (25 min) is too short for developers
-- Optimal focused session: 52-112 minutes
-- Natural human ultradian rhythm: ~90 minutes
-- Flowtime (self-regulated) produces less fatigue than fixed intervals
+**Rationale for single session:**
+- Formal 5-8 minute breaks create obvious patterns in time tracker screenshots
+- Real developers in flow state work continuously with small organic pauses
+- Micro-pauses (15-60 seconds) between activities are more natural
+- Eliminates state machine complexity (no ON_BREAK state)
 
-**Recommended structure:**
+**Current structure:**
 
 ```
-Session 1: mean=52min, σ=5min  → clamped [35, 75]
-  Break 1: mean=6.5min, σ=1.5min → clamped [3, 12]
-Session 2: mean=45min, σ=5min  → clamped [30, 60]
-  Break 2: mean=5min, σ=1.5min → clamped [3, 8]
-Session 3: mean=48min, σ=5min  → clamped [35, 65]
-  Break 3: mean=12min, σ=2min  → clamped [8, 18]  (longer break)
-Session 4: mean=38min, σ=5min  → clamped [25, 50]  (wrap-up)
+Single session: full budget (e.g., 240 min for 4 hours)
+  Micro-pauses between activities: 15-60 seconds each
+  No formal breaks
 ```
 
 ### Activity Interleaving
@@ -123,17 +118,14 @@ Activities are assigned to sessions based on:
 ### Time Budget Allocation
 
 ```
-Total budget: 240 min (4 hours)
-├── Work sessions: ~170 min (71%)
-├── Breaks: ~25 min (10%)
-├── Thinking/idle: ~30 min (13%)
-└── Transitions: ~15 min (6%)
-
-Within work sessions:
-├── Coding: ~60 min (25% of total)
+Total budget: 240 min (4 hours) — single continuous session
+├── Coding: ~60 min (25%)
 ├── Reading code: ~36 min (15%)
 ├── Terminal: ~24 min (10%)
-└── Browser: ~29 min (12%)
+├── Browser: ~29 min (12%)
+├── Thinking/idle: ~48 min (20%)
+├── Transitions: ~19 min (8%)
+└── Micro-pauses: ~24 min (10%)
 ```
 
 ---

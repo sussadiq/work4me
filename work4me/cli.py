@@ -41,8 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-budget", type=float, default=5.0, help="Max Claude API cost in USD"
     )
     start.add_argument(
-        "--mode", type=str, choices=["manual", "ai-assisted"],
-        default="manual", help="Operating mode (default: manual)"
+        "--mode", type=str, choices=["sidebar", "manual"],
+        default="sidebar", help="Operating mode (default: sidebar)"
     )
     start.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
     start.add_argument(

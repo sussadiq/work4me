@@ -10,23 +10,21 @@
 | Browser (docs, Stack Overflow) | 25-35 min | 10-15% |
 | Idle/thinking pauses | 40-60 min | 17-25% |
 | Context switching transitions | 15-20 min | 6-8% |
-| Breaks (coffee, etc.) | 10-20 min | 4-8% |
+| Micro-pauses (15-60 sec organic breaks) | Scattered | Integrated into idle time |
 
 Sources: Microsoft "Today Was a Good Day" study of 5,971 developers; multiple developer productivity studies.
 
 ## Session Structure
 
 ```
-Session 1: 45-60 min focused work  (+ Gaussian noise, σ=5min)
-  Break 1: 5-8 min
-Session 2: 35-50 min focused work
-  Break 2: 3-5 min
-Session 3: 40-55 min focused work
-  Break 3: 10-15 min (longer break)
-Session 4: 30-45 min focused work + wrap-up
+Single continuous session (full time budget)
+  Micro-pauses (15-60 sec) scattered between activities
+  No formal 5-8 minute breaks
 ```
 
-Within each session, follow the natural development cycle:
+The scheduler produces a single continuous work session. Organic micro-pauses (15-60 seconds with mouse micro-movements) are inserted between activities, replacing the previous formal break model. This produces more natural-looking activity patterns without long idle gaps.
+
+Within the session, activities follow the natural development cycle:
 1. **Research phase** (5-15 min): Browser + reading code in IDE
 2. **Coding phase** (15-30 min): Active typing, occasional terminal
 3. **Testing phase** (5-10 min): Terminal + IDE (fixing failures)
@@ -162,11 +160,13 @@ async def idle_think(self, duration_seconds: float):
     - No keyboard activity
     """
 
-async def take_break(self, duration_seconds: float):
+async def micro_pause(self, min_sec=15, max_sec=60):
     """
-    During breaks:
-    - Very occasional tiny mouse movements every 3-4 minutes
-    - Avoids triggering 5-minute idle threshold
+    Organic micro-breaks between activities:
+    - Duration: random 15-60 seconds (configurable)
+    - Mouse micro-movements every 8-20 seconds
+    - Respects speed_multiplier for time scaling
+    - Replaces formal 5-8 minute breaks
     """
 ```
 
@@ -283,12 +283,17 @@ ACTIVITY_VARIANCE_MIN = 0.04             # over 90-min window
 IDLE_MICRO_MOVEMENT_INTERVAL = (45, 90)  # seconds
 MAX_CONTINUOUS_HIGH_ACTIVITY = 1800      # seconds (30 min)
 
-# Sessions
-SESSION_DURATION_MEAN = 52               # minutes
+# Sessions (single continuous session, no formal breaks)
+SESSION_DURATION_MEAN = 52               # minutes (unused — single session covers budget)
 SESSION_DURATION_SIGMA = 5
-BREAK_DURATION_MEAN = 6.5               # minutes
-BREAK_DURATION_SIGMA = 1.5
-SESSIONS_PER_4_HOURS = 4
+BREAK_DURATION_MEAN = 0.0               # no formal breaks
+BREAK_DURATION_SIGMA = 0.0
+SESSIONS_PER_4_HOURS = 1                # single continuous session
+
+# Micro-pauses (replace formal breaks)
+MICRO_PAUSE_MIN_SECONDS = 15
+MICRO_PAUSE_MAX_SECONDS = 60
+MICRO_PAUSE_FREQUENCY = 0.3            # probability per activity transition
 
 # Time split targets
 TIME_SPLIT = {
@@ -298,6 +303,6 @@ TIME_SPLIT = {
     "browser": 0.12,
     "thinking": 0.20,
     "transitions": 0.08,
-    "breaks": 0.10,
+    "micro_pauses": 0.10,
 }
 ```

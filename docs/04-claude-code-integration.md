@@ -278,3 +278,56 @@ Write the code. Use Edit tool for file changes and Bash tool for terminal comman
 Follow the project's existing style and conventions.
 {project_context_from_claude_md}
 ```
+
+## Claude Code VS Code Extension (Sidebar Mode)
+
+### Overview
+
+The primary operating mode drives the Claude Code VS Code extension sidebar directly. This looks like a real developer using AI tools in 2026.
+
+### Extension Bridge Commands
+
+The work4me-bridge VS Code extension exposes these commands via WebSocket:
+
+| Command | Action | Response |
+|---|---|---|
+| `openClaudeCode` | Open the Claude Code sidebar panel | `{opened}` |
+| `focusClaudeInput` | Focus the Claude Code input box | `{focused}` |
+| `blurClaudeInput` | Remove focus from input box | `{blurred}` |
+| `newClaudeConversation` | Start a fresh conversation | `{newConversation}` |
+| `acceptDiff` | Accept the currently proposed diff | `{accepted}` |
+| `rejectDiff` | Reject the currently proposed diff | `{rejected}` |
+| `startClaudeWatch` | Start monitoring file changes | `{watching}` |
+| `stopClaudeWatch` | Stop monitoring, return summary | `{totalChanges, lastChangeTimestamp}` |
+| `getClaudeStatus` | Get current activity status | `{fileChanges, lastChangeTimestamp, idleMs}` |
+
+### Sidebar Interaction Flow
+
+```
+1. Open sidebar:        openClaudeCode
+2. New conversation:    newClaudeConversation
+3. Focus input:         focusClaudeInput
+4. Type prompt:         dotool keystrokes (human-like timing)
+5. Start monitoring:    startClaudeWatch
+6. Submit:              dotool "Return" key
+7. Wait for completion: poll getClaudeStatus until idleMs > 5000
+8. Stop monitoring:     stopClaudeWatch → log file changes
+9. Review diffs:        2-8s pause, then acceptDiff (95%) or rejectDiff (5%)
+10. Review files:       Open changed files in editor
+```
+
+### Completion Detection
+
+Since we can't introspect the Claude Code extension's internal state, completion is detected via file change quiescence:
+- **startClaudeWatch** resets counters and starts tracking `onDidChangeTextDocument` and `onDidCreateFiles` events
+- **getClaudeStatus** returns `idleMs` — time since last file change
+- When `idleMs > 5000` (no changes for 5 seconds), Claude is considered idle
+- Maximum wait timeout: `min(estimated_minutes * 60 * 0.8, 300)`
+
+### Input Simulation
+
+Prompts are typed using dotool/ydotool for real keyboard events (registered by time trackers). Falls back to the bridge `typeText` command if no input simulator is available.
+
+### Fallback Strategy
+
+Any exception during sidebar commands causes automatic fallback to manual mode (headless Claude Code) for that activity. This ensures Work4Me never breaks when the Claude Code extension isn't installed or behaves unexpectedly.
