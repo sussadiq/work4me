@@ -1,8 +1,51 @@
 # Terminal & Editor Control
 
-## tmux (Universal Terminal Layer)
+## VS Code + Custom WebSocket Extension (Primary)
 
-tmux is the primary control layer — works with any terminal emulator.
+VS Code is the primary visible IDE, controlled via the `work4me-bridge` WebSocket extension.
+
+### Architecture
+
+```
+VS Code ←── work4me-bridge extension (WebSocket server, port 9876)
+   ↑                    ↑
+   |                    |
+   |            Work4Me Python ──→ VSCodeController (websockets client)
+   |
+   +── Integrated Terminal (visible commands)
+   +── Editor (visible file editing)
+```
+
+### Extension Commands
+
+| Command | Params | Action |
+|---|---|---|
+| `openFile` | `path`, `line` | Open file at line |
+| `typeText` | `text` | Insert text at cursor |
+| `navigateTo` | `line`, `col` | Move cursor |
+| `saveFile` | — | Save active file |
+| `getActiveFile` | — | Get current file info |
+| `getVisibleText` | — | Get visible editor text |
+| `runTerminalCommand` | `cmd`, `name` | Run command in integrated terminal |
+| `showTerminal` | — | Focus terminal panel |
+| `focusEditor` | — | Focus editor panel |
+| `newFile` | `path` | Create and open new file |
+| `replaceFileContent` | `content` | Replace active file content |
+| `ping` | — | Health check |
+
+### Protocol
+
+JSON over WebSocket: `{id, command, ...params}` → `{id, success, result?, error?}`
+
+### Python Controller
+
+`work4me/controllers/vscode.py` — `VSCodeController` class with methods mapping to each command above, plus `launch()`, `connect()`, `health_check()`, and `cleanup()`.
+
+---
+
+## tmux (Fallback Terminal Layer)
+
+tmux is the fallback control layer — works with any terminal emulator.
 
 ### Setup
 

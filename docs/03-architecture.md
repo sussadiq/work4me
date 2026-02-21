@@ -7,14 +7,14 @@ work4me (main daemon)                     # Python asyncio, single process
   |
   +-- ydotoold                            # uinput daemon (may already be running)
   |
-  +-- claude -p ... --output-format       # Claude Code CLI (one at a time)
+  +-- claude -p ... --output-format       # Claude Code CLI (per-activity, interleaved)
   |     stream-json
   |
-  +-- tmux session "work4me"              # Host for terminal work
-  |     +-- pane 0: $SHELL               # Visible terminal
-  |     +-- pane 1: nvim --listen ...    # Visible editor
+  +-- VS Code                             # Primary visible IDE
+  |     +-- work4me-bridge extension      # WebSocket server on port 9876
+  |     +-- integrated terminal           # Visible terminal commands
   |
-  +-- chromium --remote-debugging-port    # Browser (launched when needed)
+  +-- chromium --remote-debugging-port    # Browser (launched at startup)
         =9222 --ozone-platform=wayland
 ```
 
@@ -25,8 +25,7 @@ work4me (main daemon)                     # Python asyncio, single process
 | From → To | Mechanism |
 |---|---|
 | Daemon ↔ Claude CLI | stdin/stdout pipes, stream-json parsing |
-| Daemon ↔ tmux | `tmux send-keys`, `tmux capture-pane` subprocess calls |
-| Daemon ↔ Neovim | Unix socket RPC via `pynvim` async client |
+| Daemon ↔ VS Code | WebSocket (work4me-bridge extension, port 9876) |
 | Daemon ↔ Browser | WebSocket CDP via Playwright `connect_over_cdp` |
 | Daemon ↔ Desktop | D-Bus via `dbus_next` (RemoteDesktop portal) |
 | Daemon ↔ ydotool | Subprocess calls (fallback input method) |
@@ -38,7 +37,6 @@ work4me (main daemon)                     # Python asyncio, single process
 $XDG_RUNTIME_DIR/work4me/
   daemon.pid                 # PID file for single-instance enforcement
   daemon.sock                # Unix socket for CLI control (start/stop/status)
-  nvim.sock                  # Neovim listen socket
   state.json                 # Persisted state for crash recovery
   schedule.json              # Current task schedule
   activity_log.jsonl         # Activity log (append-only)
@@ -71,9 +69,10 @@ work4me/
     clipboard.py           # wl-copy / wl-paste wrapper
 
   controllers/
+    vscode.py              # VS Code control via WebSocket bridge extension
     browser.py             # Chromium via CDP/Playwright
-    terminal.py            # tmux session management
-    editor.py              # Neovim RPC + VS Code CLI
+    terminal.py            # tmux session management (fallback)
+    editor.py              # Neovim RPC (fallback)
     claude_code.py         # Claude Code CLI subprocess management
 
   behavior/
@@ -87,23 +86,23 @@ work4me/
 ## Module Responsibilities
 
 ### `core/orchestrator.py` — Orchestrator
-The brain. Runs the main asyncio event loop and state machine. Receives high-level goals from the user, delegates to TaskPlanner for decomposition, then drives execution by cycling through the Scheduler and Controllers.
+The brain. Runs the main asyncio event loop and state machine. Supports dual operating modes: Mode A (Manual Developer — headless Claude, replay in VS Code) and Mode B (AI-Assisted Developer — type prompts into visible Claude Code). Uses interleaved per-activity execution.
 
 ```python
 class Orchestrator:
     def __init__(self, config: Config):
         self.state_machine = StateMachine()
         self.event_bus = EventBus()
-        self.task_planner = TaskPlanner(config)
-        self.scheduler = Scheduler(config)
-        self.behavior = BehaviorEngine(config)
-        self.desktop = DesktopController(config)
-        self.controllers = ControllerSet(config)
-        self.claude = ClaudeCodeManager(config)
-        self.activity_monitor = ActivityMonitor(config)
+        self._planner = TaskPlanner(config.claude)
+        self._scheduler = Scheduler(config.session)
+        self._behavior = BehaviorEngine(config)
+        self._vscode = VSCodeController(config.vscode)
+        self._browser_ctrl = BrowserController(config.browser)
+        self._claude = ClaudeCodeManager(config.claude)
+        self._activity_monitor = ActivityMonitor(config.activity)
 
-    async def run(self, task_description: str, time_budget_minutes: int):
-        """Main entry point. Plans, schedules, executes."""
+    async def run(self, task_description: str, time_budget_minutes: int, working_dir: str):
+        """Main entry point. Plans, schedules, executes per-activity."""
 ```
 
 ### `planning/task_planner.py` — TaskPlanner
@@ -270,33 +269,40 @@ PICKING_ACTIVITY -> EXECUTING_MICRO_ACTION -> (loop) -> ACTIVITY_DONE
 
 ## Core Data Flow
 
+### Mode A (Manual Developer)
 ```
-1. Orchestrator: "Time to write auth middleware"
+1. Scheduler picks next activity: "Write auth middleware"
        |
-2. ClaudeCodeManager.execute("Write JWT auth middleware...")
+2. ClaudeCodeManager.execute(activity_prompt)
        |  (subprocess: claude -p "..." --output-format stream-json)
        |
 3. Claude Code works at full speed (seconds):
-       |  → stream-json events:
-       |    - tool_use: Edit "src/middleware/auth.ts" (code content)
-       |    - tool_use: Bash "npm test"
+       |  → stream-json events captured as actions
        |
-4. Orchestrator captures action queue:
-       |    [EditAction(file, code), BashAction("npm test")]
+4. For each action — replay in VS Code:
+       |  a. VSCodeController.open_file("src/auth.ts")
+       |  b. VSCodeController.type_text(code_content)  # visible typing
+       |  c. VSCodeController.save_file()
        |
-5. For EditAction — replay visibly:
-       |  a. EditorController.open_file("src/middleware/auth.ts")
-       |     → BehaviorEngine types ":e src/middleware/auth.ts\n" at human speed
-       |  b. BehaviorEngine.type_text(code_content)
-       |     → Char-by-char at 55-70 WPM with errors/pauses
-       |  c. EditorController.save() → types ":w\n"
+5. For terminal commands:
+       |  a. VSCodeController.run_terminal_command("npm test")
        |
-6. For BashAction — replay visibly:
-       |  a. TerminalController.run_command("npm test")
-       |     → BehaviorEngine types "npm test\n" in tmux pane
-       |  b. Wait for real output via tmux capture-pane
+6. ActivityMonitor records events, adjusts pacing
+```
+
+### Mode B (AI-Assisted Developer)
+```
+1. Scheduler picks next activity: "Write auth middleware"
        |
-7. ActivityMonitor records all events, feeds back to Orchestrator
+2. VSCodeController.show_terminal()
+3. VSCodeController.run_terminal_command("claude -p 'prompt'")
+       |  (visible Claude Code session in VS Code terminal)
+       |
+4. idle_think() while Claude works visibly
+       |
+5. VSCodeController.focus_editor() → review output files
+       |
+6. ActivityMonitor records events
 ```
 
 ## Feedback Loops
@@ -434,8 +440,8 @@ Claude Code in `--dangerously-skip-permissions` mode works headlessly — fast b
 ### Why asyncio single-process?
 100% I/O-bound workload. asyncio handles thousands of concurrent I/O operations efficiently. Multiprocessing adds complexity for zero benefit.
 
-### Why tmux as the universal terminal layer?
-Three critical capabilities: (1) read terminal content (`capture-pane`), (2) send keystrokes (`send-keys`), (3) manage panes. Works with any terminal emulator.
+### Why VS Code as primary IDE?
+Screenshot credibility — VS Code is what engineers use in 2026. The custom WebSocket bridge extension (`work4me-bridge`) provides precise programmatic control (open files, type text, run terminal commands, navigate). tmux/Neovim are retained as fallbacks.
 
-### Why Neovim as primary editor?
-Richest programmatic control: full RPC API over Unix socket, runs in terminal (tmux can host it). VS Code requires a custom extension for comparable control.
+### Why dual operating modes?
+Mode A (Manual Developer) imitates hand-coding. Mode B (AI-Assisted Developer) imitates using AI tools interactively. Both are realistic 2026 workflows. Users choose which pattern they want to present to time trackers.
