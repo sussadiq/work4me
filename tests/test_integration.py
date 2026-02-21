@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from work4me.config import Config
 from work4me.core.orchestrator import Orchestrator
+from work4me.core.state import StateSnapshot, State
 from work4me.planning.task_planner import Activity, ActivityKind, TaskPlan
 from work4me.planning.scheduler import Schedule, WorkSession
 
@@ -32,7 +33,9 @@ async def test_full_flow_mode_a(mock_schedule):
     # Mock all external controllers
     orch._vscode = AsyncMock()
     orch._browser_ctrl = AsyncMock()
-    orch._behavior = AsyncMock()
+    behavior_mock = AsyncMock()
+    behavior_mock.apply_adjustment = MagicMock()  # sync method
+    orch._behavior = behavior_mock
     orch._claude = AsyncMock()
     orch._claude.execute = AsyncMock(return_value=MagicMock(
         actions=[], raw_text="done", exit_code=0, error=None, session_id="test"
@@ -73,7 +76,9 @@ async def test_full_flow_mode_b(mock_schedule):
     # Mock all external controllers
     orch._vscode = AsyncMock()
     orch._browser_ctrl = AsyncMock()
-    orch._behavior = AsyncMock()
+    behavior_mock = AsyncMock()
+    behavior_mock.apply_adjustment = MagicMock()  # sync method
+    orch._behavior = behavior_mock
     orch._claude = AsyncMock()
     orch._planner = AsyncMock()
     orch._planner.decompose = AsyncMock(return_value=TaskPlan(
@@ -97,3 +102,31 @@ async def test_full_flow_mode_b(mock_schedule):
     # Mode B should use VS Code terminal, not headless Claude
     orch._vscode.show_terminal.assert_called()
     orch._cleanup.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_engine_monitor_integration():
+    """Verify engine events flow to monitor during orchestration."""
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+    # Verify wiring happened in constructor
+    assert orch._behavior._activity_monitor is orch._activity_monitor
+
+
+@pytest.mark.asyncio
+async def test_recovery_flow(tmp_path):
+    """Verify crash recovery detects resumable state."""
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+
+    # Simulate a crashed session
+    snap = StateSnapshot()
+    snap.state = State.WORKING.value
+    snap.task_description = "Build feature"
+    snap.current_activity_index = 2
+    snap.save(tmp_path / "state.json")
+
+    with patch.object(type(config), 'runtime_dir', new_callable=lambda: property(lambda self: tmp_path)):
+        recovered = orch.check_for_recovery()
+    assert recovered is not None
+    assert recovered.current_activity_index == 2
