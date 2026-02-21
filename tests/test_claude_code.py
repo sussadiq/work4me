@@ -122,3 +122,28 @@ async def test_execute_raises_if_stdout_pipe_missing():
     with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
         result = await mgr.execute("test prompt", "/tmp")
     assert "stdout pipe" in result.error
+
+
+@pytest.mark.asyncio
+async def test_execute_streaming_stderr_devnull():
+    """execute_streaming should use DEVNULL for stderr to prevent deadlock."""
+    from unittest.mock import AsyncMock, MagicMock, patch, call
+    import asyncio
+
+    mgr = ClaudeCodeManager(ClaudeConfig())
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = asyncio.StreamReader()
+    mock_proc.stdout.feed_eof()
+    mock_proc.returncode = 0
+    mock_proc.terminate = MagicMock()
+    mock_proc.wait = AsyncMock(return_value=0)
+
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec:
+        actions = []
+        async for action in mgr.execute_streaming("test", "/tmp"):
+            actions.append(action)
+
+        # Verify stderr=DEVNULL was used
+        _, kwargs = mock_exec.call_args
+        assert kwargs["stderr"] == asyncio.subprocess.DEVNULL

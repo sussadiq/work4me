@@ -20,6 +20,7 @@ class VSCodeController:
         self._ws: Any = None  # websockets connection
         self._msg_id = 0
         self._launch_on_start = config.launch_on_start
+        self._lock = asyncio.Lock()
 
     async def connect(self, retries: int = 5, delay: float = 2.0) -> None:
         """Connect to the VS Code WebSocket bridge."""
@@ -59,18 +60,30 @@ class VSCodeController:
         if self._ws is None:
             raise ConnectionError("Not connected to VS Code bridge")
 
-        self._msg_id += 1
-        msg = {"id": str(self._msg_id), "command": command, **kwargs}
-        await self._ws.send(json.dumps(msg))
-        try:
-            raw = await asyncio.wait_for(self._ws.recv(), timeout=timeout)
-        except asyncio.TimeoutError:
-            raise TimeoutError(f"VS Code command '{command}' timed out after {timeout}s")
-        response = json.loads(raw)
+        async with self._lock:
+            self._msg_id += 1
+            expected_id = str(self._msg_id)
+            msg = {"id": expected_id, "command": command, **kwargs}
+            await self._ws.send(json.dumps(msg))
 
-        if not response.get("success"):
-            raise RuntimeError(f"VS Code command failed: {response.get('error')}")
-        return response.get("result", {})
+            for _retry in range(3):
+                try:
+                    raw = await asyncio.wait_for(self._ws.recv(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    raise TimeoutError(f"VS Code command '{command}' timed out after {timeout}s")
+                response = json.loads(raw)
+
+                if response.get("id") == expected_id:
+                    if not response.get("success"):
+                        raise RuntimeError(f"VS Code command failed: {response.get('error')}")
+                    return response.get("result", {})
+
+                logger.warning(
+                    "Response ID mismatch: expected %s, got %s — retrying recv",
+                    expected_id, response.get("id"),
+                )
+
+            raise RuntimeError(f"VS Code command '{command}': response ID mismatch after 3 retries")
 
     async def open_file(self, path: str, line: int = 1) -> None:
         """Open a file in the editor at the given line."""

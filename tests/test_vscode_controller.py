@@ -74,3 +74,36 @@ async def test_restart_reconnects(controller):
         await controller.restart()
         mock_connect.assert_called_once()
     assert controller._ws is None or mock_connect.called
+
+
+@pytest.mark.asyncio
+async def test_send_command_validates_response_id(controller):
+    """send_command should verify response ID matches request."""
+    mock_ws = AsyncMock()
+    # First recv returns wrong ID, second returns correct ID
+    mock_ws.recv = AsyncMock(side_effect=[
+        json.dumps({"id": "999", "success": True, "result": {"wrong": True}}),
+        json.dumps({"id": "1", "success": True, "result": {"correct": True}}),
+    ])
+    controller._ws = mock_ws
+    controller._msg_id = 0
+
+    result = await controller.send_command("test")
+    assert result["correct"] is True
+
+
+@pytest.mark.asyncio
+async def test_send_command_retries_on_wrong_id(controller):
+    """send_command should retry recv when response ID doesn't match."""
+    mock_ws = AsyncMock()
+    # Three wrong IDs → should raise RuntimeError
+    mock_ws.recv = AsyncMock(side_effect=[
+        json.dumps({"id": "wrong1", "success": True, "result": {}}),
+        json.dumps({"id": "wrong2", "success": True, "result": {}}),
+        json.dumps({"id": "wrong3", "success": True, "result": {}}),
+    ])
+    controller._ws = mock_ws
+    controller._msg_id = 0
+
+    with pytest.raises(RuntimeError, match="response ID mismatch"):
+        await controller.send_command("test")

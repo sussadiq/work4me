@@ -286,6 +286,42 @@ async def test_replay_action_allows_valid_path(orchestrator):
 
 
 @pytest.mark.asyncio
+async def test_execute_session_skips_completed_activities():
+    """When resuming, activities before activity_start_index should be skipped."""
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+    orch._behavior = AsyncMock()
+    orch._activity_monitor = MagicMock()
+    orch._activity_monitor.recommended_adjustment = MagicMock(
+        return_value=MagicMock(value="none")
+    )
+    orch.event_bus = AsyncMock()
+    orch._time_budget_seconds = 99999
+    orch._start_time = 0
+
+    activities = [
+        Activity(ActivityKind.THINKING, f"Think {i}", 1, [], [], [], [])
+        for i in range(5)
+    ]
+    session = WorkSession(
+        activities=activities, duration_minutes=10,
+        break_after_minutes=0, session_number=1,
+    )
+
+    executed = []
+    original_execute = orch._execute_activity_with_retry
+    async def tracking_execute(activity, working_dir, **kwargs):
+        executed.append(activity.description)
+    orch._execute_activity_with_retry = AsyncMock(side_effect=tracking_execute)
+    orch._persist_state = MagicMock()
+
+    await orch._execute_session(session, "/tmp", activity_start_index=3)
+    assert len(executed) == 2
+    assert executed[0] == "Think 3"
+    assert executed[1] == "Think 4"
+
+
+@pytest.mark.asyncio
 async def test_retry_zero_raises_runtime_error():
     """max_retries=0 should raise RuntimeError, not TypeError from raise None."""
     config = Config(mode="manual")

@@ -120,8 +120,9 @@ class Orchestrator:
 
             # WORKING — per-activity interleaved execution
             self._transition("plan_ready")
-            for session in schedule.sessions:
-                await self._execute_session(session, working_dir)
+            for si, session in enumerate(schedule.sessions):
+                start_idx = self.snapshot.current_activity_index if (recovered and si == 0) else 0
+                await self._execute_session(session, working_dir, activity_start_index=start_idx)
 
                 # Break between sessions
                 if session.break_after_minutes > 0:
@@ -218,14 +219,20 @@ class Orchestrator:
     # Session and activity execution
     # ------------------------------------------------------------------
 
-    async def _execute_session(self, session: WorkSession, working_dir: str) -> None:
+    async def _execute_session(
+        self, session: WorkSession, working_dir: str, activity_start_index: int = 0,
+    ) -> None:
         """Execute all activities in a work session."""
         logger.info(
-            "Starting session %d: %d activities, %.0f min",
+            "Starting session %d: %d activities, %.0f min (start_idx=%d)",
             session.session_number, len(session.activities), session.duration_minutes,
+            activity_start_index,
         )
 
         for i, activity in enumerate(session.activities):
+            if i < activity_start_index:
+                logger.info("Skipping already-completed activity %d", i)
+                continue
             # Check time budget
             elapsed = time.monotonic() - self._start_time
             remaining = self._time_budget_seconds - elapsed
