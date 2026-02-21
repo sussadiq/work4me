@@ -229,7 +229,7 @@ class Orchestrator:
                 )
             )
 
-            await self._execute_activity(activity, working_dir)
+            await self._execute_activity_with_retry(activity, working_dir)
 
             # Persist state after each activity
             self.snapshot.current_activity_index = i + 1
@@ -240,6 +240,26 @@ class Orchestrator:
 
             # Natural pause between activities
             await self._behavior.pause_natural(2.0, 6.0)
+
+    async def _execute_activity_with_retry(
+        self, activity: Activity, working_dir: str, max_retries: int = 3
+    ) -> None:
+        """Execute an activity with exponential backoff retry."""
+        last_exc: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                await self._execute_activity(activity, working_dir)
+                return
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt * 2  # 2s, 4s, 8s
+                    logger.warning(
+                        "Activity failed (attempt %d/%d), retrying in %ds: %s",
+                        attempt + 1, max_retries, wait, exc,
+                    )
+                    await asyncio.sleep(wait)
+        raise last_exc
 
     async def _execute_activity(self, activity: Activity, working_dir: str) -> None:
         """Dispatch activity based on kind and mode."""

@@ -1,6 +1,7 @@
 # tests/test_orchestrator.py
 """Tests for the revised dual-mode orchestrator."""
 
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from work4me.core.orchestrator import Orchestrator
@@ -106,3 +107,41 @@ async def test_watchdog_tick_unhealthy_vscode():
     orch._browser_ctrl.health_check = AsyncMock(return_value=True)
     await orch._watchdog_tick()
     orch._vscode.restart.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_retry_succeeds_on_second_attempt():
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+    orch._behavior = AsyncMock()
+    orch._activity_monitor = MagicMock()
+    orch._activity_monitor.record_event = MagicMock()
+
+    call_count = 0
+    async def flaky_execute(activity, working_dir):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("Temporary failure")
+
+    orch._execute_activity = AsyncMock(side_effect=flaky_execute)
+    activity = Activity(ActivityKind.CODING, "test", 5, [], [], [], [])
+    # Patch asyncio.sleep to avoid real delays during retry backoff
+    with patch("work4me.core.orchestrator.asyncio.sleep", new_callable=AsyncMock):
+        await orch._execute_activity_with_retry(activity, "/tmp", max_retries=3)
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_retry_exhausted_raises():
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+    orch._behavior = AsyncMock()
+    orch._activity_monitor = MagicMock()
+    orch._activity_monitor.record_event = MagicMock()
+
+    orch._execute_activity = AsyncMock(side_effect=RuntimeError("Persistent failure"))
+    activity = Activity(ActivityKind.CODING, "test", 5, [], [], [], [])
+    with patch("work4me.core.orchestrator.asyncio.sleep", new_callable=AsyncMock):
+        with pytest.raises(RuntimeError, match="Persistent failure"):
+            await orch._execute_activity_with_retry(activity, "/tmp", max_retries=2)
