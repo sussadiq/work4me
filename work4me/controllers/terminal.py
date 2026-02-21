@@ -1,4 +1,7 @@
-"""Terminal controller using tmux.
+"""[STAGED] Terminal controller using tmux.
+
+Planned for future Sway compositor target (see docs/05-compositor.md).
+Not currently imported by the main application — VS Code terminal is used instead.
 
 Creates and manages a tmux session with split panes for shell and editor.
 Provides methods to send keystrokes, read output, and manage panes.

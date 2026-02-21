@@ -1,4 +1,7 @@
-"""Editor controller for Neovim.
+"""[STAGED] Editor controller for Neovim.
+
+Planned for future Sway compositor target (see docs/05-compositor.md).
+Not currently imported by the main application — VS Code is used instead.
 
 Provides programmatic control over Neovim via RPC socket for querying state,
 while visible typing goes through tmux send-keys (via BehaviorEngine).

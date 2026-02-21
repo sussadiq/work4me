@@ -1,4 +1,7 @@
-"""Input simulation layer for Wayland.
+"""[STAGED] Input simulation layer for Wayland.
+
+Planned for future Sway compositor target (see docs/05-compositor.md).
+Not currently imported by the main application — VS Code extension handles input.
 
 Provides an abstraction over input methods:
 - ydotool/dotool (universal, kernel uinput)

@@ -23,7 +23,6 @@ class ActionKind(Enum):
     EDIT = "edit"
     BASH = "bash"
     WRITE = "write"
-    TEXT = "text"
 
 
 @dataclass
@@ -166,44 +165,6 @@ class ClaudeCodeManager:
         )
         return result
 
-    async def execute_streaming(
-        self,
-        prompt: str,
-        working_dir: str,
-        *,
-        resume_session: str | None = None,
-        max_turns: int | None = None,
-        max_budget: float | None = None,
-    ) -> AsyncIterator[CapturedAction]:
-        """Run Claude Code and yield actions as they arrive."""
-        cmd = self._build_command(
-            prompt,
-            resume_session=resume_session,
-            max_turns=max_turns,
-            max_budget=max_budget,
-        )
-
-        logger.info("Spawning Claude Code (streaming): %s", " ".join(cmd[:6]) + " ...")
-
-        self._process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            cwd=working_dir,
-        )
-
-        if self._process.stdout is None:
-            raise RuntimeError("subprocess stdout pipe is missing")
-
-        try:
-            async for action in self._parse_stream(self._process.stdout):
-                yield action
-        finally:
-            if self._process.returncode is None:
-                self._process.terminate()
-                await self._process.wait()
-            self._process = None
-
     async def _parse_stream(
         self, stdout: asyncio.StreamReader
     ) -> AsyncIterator[CapturedAction]:
@@ -326,14 +287,3 @@ class ClaudeCodeManager:
 
         return None
 
-    async def cancel(self) -> None:
-        """Cancel the running Claude Code process."""
-        if self._process and self._process.returncode is None:
-            logger.info("Cancelling Claude Code process")
-            self._process.terminate()
-            try:
-                await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except TimeoutError:
-                logger.warning("Claude Code didn't exit, killing")
-                self._process.kill()
-                await self._process.wait()
