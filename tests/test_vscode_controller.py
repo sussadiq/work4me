@@ -107,3 +107,54 @@ async def test_send_command_retries_on_wrong_id(controller):
 
     with pytest.raises(RuntimeError, match="response ID mismatch"):
         await controller.send_command("test")
+
+
+@pytest.mark.asyncio
+async def test_connect_defaults(controller):
+    """connect() should use 10 retries and exponential backoff by default."""
+    import inspect
+    sig = inspect.signature(controller.connect)
+    assert sig.parameters['retries'].default == 10
+    assert sig.parameters['delay'].default == 1.0
+
+
+@pytest.mark.asyncio
+async def test_connect_exponential_backoff(controller):
+    """connect() should use exponential backoff capped at 5s."""
+    mock_ws_module = MagicMock()
+    mock_ws_module.connect = AsyncMock(side_effect=ConnectionRefusedError)
+    sleep_delays = []
+    original_sleep = asyncio.sleep
+
+    async def mock_sleep(duration):
+        sleep_delays.append(duration)
+
+    with patch.dict('sys.modules', {'websockets': mock_ws_module}), \
+         patch('asyncio.sleep', side_effect=mock_sleep):
+        with pytest.raises(ConnectionError, match="after 5 attempts"):
+            await controller.connect(retries=5, delay=1.0)
+
+    # Backoff: 1.0, 2.0, 4.0, 5.0 (capped) — 4 sleeps for 5 retries
+    assert len(sleep_delays) == 4
+    assert sleep_delays[0] == 1.0
+    assert sleep_delays[1] == 2.0
+    assert sleep_delays[2] == 4.0
+    assert sleep_delays[3] == 5.0  # capped at max_delay
+
+
+@pytest.mark.asyncio
+async def test_connect_logs_at_info_level(controller):
+    """connect() should log retries at INFO level."""
+    mock_ws_module = MagicMock()
+    mock_ws_module.connect = AsyncMock(side_effect=ConnectionRefusedError)
+
+    with patch.dict('sys.modules', {'websockets': mock_ws_module}), \
+         patch('asyncio.sleep', new_callable=AsyncMock), \
+         patch('work4me.controllers.vscode.logger') as mock_logger:
+        with pytest.raises(ConnectionError):
+            await controller.connect(retries=3, delay=1.0)
+
+    # Should log at INFO (not DEBUG) for each retry except the last
+    info_calls = mock_logger.info.call_args_list
+    retry_logs = [c for c in info_calls if "not ready" in str(c)]
+    assert len(retry_logs) == 2  # 2 retries before final failure

@@ -1,11 +1,11 @@
-"""Browser automation via Chromium CDP/Playwright."""
+"""Browser automation via Firefox/Playwright."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import quote_plus
 
 from work4me.config import BrowserConfig
@@ -14,204 +14,49 @@ logger = logging.getLogger(__name__)
 
 
 class BrowserController:
-    """Controls a visible Chromium browser via Playwright/CDP."""
+    """Controls a visible Firefox browser via Playwright."""
 
     def __init__(self, config: BrowserConfig):
         self._config = config
-        self._browser: Any = None
         self._context: Any = None
         self._page: Any = None
-        self._process: Optional[asyncio.subprocess.Process] = None
         self._browser_available: bool = False
 
     async def launch(self) -> None:
-        """Launch Chromium with remote debugging and connect via Playwright.
-
-        Flow:
-        1. Pre-flight: try connecting to an existing CDP endpoint on the port.
-           If successful, skip spawning a new process.
-        2. Spawn Chrome with --remote-debugging-port.
-        3. After initial wait, check if the process exited early (Chrome
-           singleton behavior — delegated to existing instance and quit).
-        4. If singleton detected: terminate existing Chrome, re-spawn.
-        5. CDP retry loop to establish Playwright connection.
-        """
-        # Step 1: Pre-flight — try connecting to existing CDP endpoint
-        if await self._try_connect_existing():
-            logger.info("Connected to existing Chrome CDP on port %d", self._config.debug_port)
-            return
-
-        # Step 2: Spawn Chrome
-        self._process = await self._spawn_chrome()
-        await asyncio.sleep(self._config.cdp_initial_wait)
-
-        # Step 3: Check for early exit (singleton behavior)
-        if self._process.returncode is not None:
-            logger.warning(
-                "Chrome exited immediately (rc=%d) — singleton detected, "
-                "existing Chrome is running without CDP",
-                self._process.returncode,
-            )
-            # Step 4: Terminate existing Chrome and re-spawn
-            await self._terminate_existing_chrome()
-            self._process = await self._spawn_chrome()
-            await asyncio.sleep(self._config.cdp_initial_wait)
-
-        # Step 5: CDP retry loop
-        await self._connect_cdp()
-
-    async def _try_connect_existing(self) -> bool:
-        """Try connecting to an existing CDP endpoint on the configured port.
-
-        Returns True if connection succeeded and browser is ready.
-        """
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError:
-            return False
-
-        try:
-            self._playwright = await async_playwright().__aenter__()
-            self._browser = await self._playwright.chromium.connect_over_cdp(
-                f"http://localhost:{self._config.debug_port}",
-                timeout=3000,
-            )
-        except Exception:
-            # Clean up playwright on failure
-            try:
-                if hasattr(self, "_playwright") and self._playwright:
-                    await self._playwright.stop()
-                    self._playwright = None  # type: ignore[assignment]
-            except Exception:
-                pass
-            self._browser = None
-            return False
-
-        # Connected — set up context and page
-        await self._finalize_connection()
-        return True
-
-    async def _spawn_chrome(self) -> asyncio.subprocess.Process:
-        """Spawn a Chrome process with remote debugging enabled."""
-        cmd = [
-            self._config.chromium_path,
-            f"--remote-debugging-port={self._config.debug_port}",
-            f"--ozone-platform={self._config.ozone_platform}",
-            "--no-first-run",
-            "--no-default-browser-check",
-        ]
-        if self._config.user_data_dir:
-            cmd.append(f"--user-data-dir={self._config.user_data_dir}")
-        if self._config.profile_directory:
-            cmd.append(f"--profile-directory={self._config.profile_directory}")
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        logger.info(
-            "Chrome spawned (pid=%d) on port %d",
-            process.pid,
-            self._config.debug_port,
-        )
-        return process
-
-    async def _terminate_existing_chrome(self) -> None:
-        """Terminate existing Chrome processes matching the configured binary."""
-        binary = self._config.chromium_path
-        logger.info("Terminating existing Chrome (%s) for CDP takeover", binary)
-
-        # Graceful: pkill by binary name
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "pkill", "-f", binary,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await proc.wait()
-        except Exception:
-            logger.warning("pkill failed", exc_info=True)
-            return
-
-        # Wait up to 5s for graceful shutdown
-        for _ in range(10):
-            await asyncio.sleep(0.5)
-            check = await asyncio.create_subprocess_exec(
-                "pgrep", "-f", binary,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            if await check.wait() != 0:
-                # No processes found — Chrome is gone
-                logger.info("Existing Chrome terminated gracefully")
-                await asyncio.sleep(1.0)  # Allow port/lock cleanup
-                return
-
-        # Force kill
-        logger.warning("Chrome didn't exit gracefully, force killing")
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "pkill", "-9", "-f", binary,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await proc.wait()
-        except Exception:
-            logger.warning("Force kill failed", exc_info=True)
-        await asyncio.sleep(1.0)  # Allow port/lock cleanup
-
-    async def _connect_cdp(self) -> None:
-        """Run the CDP retry loop to connect Playwright to Chrome."""
+        """Launch Firefox via Playwright with a persistent context."""
         try:
             from playwright.async_api import async_playwright
         except ImportError:
             raise RuntimeError(
-                "playwright required: pip install playwright && playwright install chromium"
+                "playwright required: pip install playwright && playwright install firefox"
             )
 
-        last_exc: Exception | None = None
-        for attempt in range(self._config.cdp_max_retries):
-            try:
-                self._playwright = await async_playwright().__aenter__()
-                self._browser = await self._playwright.chromium.connect_over_cdp(
-                    f"http://localhost:{self._config.debug_port}"
-                )
-                break  # success
-            except Exception as exc:
-                last_exc = exc
-                if attempt < self._config.cdp_max_retries - 1:
-                    wait = self._config.cdp_retry_base_delay * (2 ** attempt)
-                    logger.warning(
-                        "CDP connection attempt %d/%d failed, retrying in %.1fs: %s",
-                        attempt + 1, self._config.cdp_max_retries, wait, exc,
-                    )
-                    # Clean up the failed playwright instance before retrying
-                    try:
-                        if hasattr(self, "_playwright") and self._playwright:
-                            await self._playwright.stop()
-                    except Exception:
-                        pass
-                    await asyncio.sleep(wait)
-        else:
-            raise RuntimeError(
-                f"CDP connection failed after {self._config.cdp_max_retries} attempts: {last_exc}"
-            )
+        self._playwright = await async_playwright().__aenter__()
 
-        await self._finalize_connection()
+        self._context = await self._playwright.firefox.launch_persistent_context(
+            self._config.user_data_dir or "",
+            headless=False,
+            timeout=self._config.launch_timeout,
+            firefox_user_prefs={
+                "dom.webdriver.enabled": False,
+            },
+        )
 
-    async def _finalize_connection(self) -> None:
-        """Set up browser context and page after CDP connection."""
-        if self._browser.contexts:
-            self._context = self._browser.contexts[0]
-        else:
-            self._context = await self._browser.new_context()
+        # Mask navigator.webdriver on every page (including future navigations)
+        await self._context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        )
+
         self._page = (
             self._context.pages[0]
             if self._context.pages
             else await self._context.new_page()
         )
         self._browser_available = True
-        logger.info("Connected to Chromium via CDP")
+        logger.info(
+            "Firefox launched (visible, persistent=%s)",
+            bool(self._config.user_data_dir),
+        )
 
     async def navigate(self, url: str) -> None:
         """Navigate to a URL."""
@@ -292,29 +137,16 @@ class BrowserController:
         await self.launch()
 
     async def cleanup(self) -> None:
-        """Disconnect from browser (don't close it)."""
+        """Close browser and stop Playwright."""
         self._browser_available = False
         try:
-            if self._browser:
-                await self._browser.disconnect()
-                self._browser = None
+            if self._context:
+                await self._context.close()
+                self._context = None
         except Exception:
-            logger.warning("Failed to disconnect browser", exc_info=True)
+            logger.warning("Failed to close browser context", exc_info=True)
         try:
             if hasattr(self, "_playwright") and self._playwright:
                 await self._playwright.stop()
         except Exception:
-            logger.warning("Failed to close playwright", exc_info=True)
-        if self._process:
-            if self._process.returncode is None:
-                try:
-                    self._process.terminate()
-                except ProcessLookupError:
-                    pass
-                else:
-                    try:
-                        await asyncio.wait_for(self._process.wait(), timeout=5.0)
-                    except (asyncio.TimeoutError, TimeoutError):
-                        self._process.kill()
-                        await self._process.wait()
-            self._process = None
+            logger.warning("Failed to stop playwright", exc_info=True)

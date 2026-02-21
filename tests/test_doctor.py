@@ -123,6 +123,38 @@ def test_install_gnome_extension_bundle_missing():
     assert "bundle not found" in result.detail
 
 
+# ------------------------------------------------------------------
+# Playwright Firefox checks
+# ------------------------------------------------------------------
+
+def test_check_playwright_firefox_found():
+    dc = DoctorChecks()
+    mock_bin = MagicMock()
+    mock_bin.__str__ = lambda self: "/home/user/.cache/ms-playwright/firefox-1509/firefox/firefox"
+    with patch("pathlib.Path.exists", return_value=True), \
+         patch("pathlib.Path.glob", return_value=[mock_bin]):
+        result = dc.check_playwright_firefox()
+    assert result.passed
+    assert "firefox" in result.detail
+
+
+def test_check_playwright_firefox_missing():
+    dc = DoctorChecks()
+    with patch("pathlib.Path.exists", return_value=True), \
+         patch("pathlib.Path.glob", return_value=[]):
+        result = dc.check_playwright_firefox()
+    assert not result.passed
+    assert "playwright install firefox" in result.detail
+
+
+def test_check_playwright_firefox_no_cache_dir():
+    dc = DoctorChecks()
+    with patch("pathlib.Path.exists", return_value=False):
+        result = dc.check_playwright_firefox()
+    assert not result.passed
+    assert "playwright install firefox" in result.detail
+
+
 def test_run_all_includes_gnome_extension_on_gnome():
     dc = DoctorChecks()
     with patch("shutil.which", return_value="/usr/bin/test"), \

@@ -174,7 +174,7 @@ class Orchestrator:
         # Launch VS Code
         if self.config.vscode.launch_on_start:
             await self._vscode.launch(working_dir)
-            await asyncio.sleep(3.0)  # Wait for VS Code to start
+            await asyncio.sleep(5.0)  # Wait for VS Code + onStartupFinished
 
         # Connect to VS Code WebSocket bridge
         try:
@@ -187,7 +187,7 @@ class Orchestrator:
             try:
                 await self._browser_ctrl.launch()
             except Exception:
-                logger.warning("Could not launch browser — continuing without it")
+                logger.warning("Could not launch browser — continuing without it", exc_info=True)
 
         # Auto-install GNOME focus extension if needed
         await self._ensure_gnome_extension()

@@ -139,6 +139,18 @@ class DoctorChecks:
 
         return CheckResult("GNOME Extension Install", False, "install failed")
 
+    def check_playwright_firefox(self) -> CheckResult:
+        """Check if Playwright Firefox browser binaries are installed."""
+        cache_dir = Path.home() / ".cache" / "ms-playwright"
+        if cache_dir.exists():
+            firefox_bins = sorted(cache_dir.glob("firefox-*/firefox/firefox"))
+            if firefox_bins:
+                return CheckResult("Playwright Firefox", True, str(firefox_bins[-1]))
+        return CheckResult(
+            "Playwright Firefox", False,
+            "not installed — run: playwright install firefox",
+        )
+
     def run_all(self) -> list[CheckResult]:
         results = []
         for cmd, label in self.BINARIES:
@@ -146,6 +158,7 @@ class DoctorChecks:
         results.append(self.check_uinput())
         results.append(self.check_wayland())
         results.append(self.check_vscode_extension())
+        results.append(self.check_playwright_firefox())
         # Only check GNOME extension on GNOME desktops
         desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
         if "GNOME" in desktop:

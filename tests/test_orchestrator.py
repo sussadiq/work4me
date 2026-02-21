@@ -407,7 +407,7 @@ async def test_coding_ai_assisted_focuses_vscode_window(orchestrator):
 
 
 @pytest.mark.asyncio
-async def test_browser_activity_focuses_chrome_window(orchestrator):
+async def test_browser_activity_focuses_firefox_window(orchestrator):
     """_execute_browser should focus the browser window after health check."""
     activity = Activity(
         ActivityKind.BROWSER, "Research JWT", 10,
@@ -421,7 +421,7 @@ async def test_browser_activity_focuses_chrome_window(orchestrator):
 
     await orchestrator._execute_browser(activity)
     orchestrator._window_mgr.focus_window.assert_called_once_with(
-        "google-chrome", title_hint="",
+        "firefox", title_hint="",
     )
 
 

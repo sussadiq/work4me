@@ -1,59 +1,41 @@
 # Browser Automation
 
-## Approach: Chromium via Chrome DevTools Protocol (CDP)
+## Approach: Firefox via Playwright
 
-Launch a visible Chromium window and control it via CDP, either directly or through Playwright.
+Launch a visible Firefox window using Playwright's `launch_persistent_context`, which manages the browser lifecycle natively. No subprocess spawning, no port polling, no singleton issues.
 
-## Launching Chromium
+### Why Firefox over Chrome?
 
-```bash
-chromium --remote-debugging-port=9222 \
-         --ozone-platform=wayland \
-         --no-first-run \
-         --no-default-browser-check
-```
+Chrome has an unfixable singleton problem on Linux: when the user's Chrome is already running, spawning `google-chrome --remote-debugging-port=9222` results in the new process either exiting silently (delegating via IPC) or hanging as a zombie — port 9222 never opens. Firefox via Playwright avoids this entirely.
 
-Key flags:
-- `--remote-debugging-port=9222` — enables CDP WebSocket access
-- `--ozone-platform=wayland` — required on Wayland (without it, headed mode may fail)
-- Chrome outputs: `DevTools listening on ws://127.0.0.1:9222/devtools/browser/<id>`
-
-## Connecting via Playwright
+## Launching Firefox
 
 ```python
 from playwright.async_api import async_playwright
 
-async with async_playwright() as p:
-    browser = await p.chromium.connect_over_cdp('http://localhost:9222')
-    context = browser.contexts[0]
-    page = context.pages[0]
-
-    await page.goto('https://stackoverflow.com')
-    # ... interact with page ...
-
-    # IMPORTANT: disconnect, don't close (or you kill the visible browser)
-    await browser.disconnect()  # NOT browser.close()
+pw = await async_playwright().__aenter__()
+context = await pw.firefox.launch_persistent_context(
+    user_data_dir or "",       # Empty string = temp profile
+    headless=False,            # Visible window
+    timeout=30000,             # Launch timeout (ms)
+)
+page = context.pages[0] if context.pages else await context.new_page()
 ```
 
-## Connecting via Puppeteer (Node.js alternative)
+Key points:
+- `launch_persistent_context` returns a `BrowserContext` directly (no separate `Browser` object)
+- `headless=False` ensures a visible browser window opens
+- Persistent profile via `user_data_dir` preserves bookmarks, history, login sessions
+- Empty `user_data_dir` creates a temporary profile
 
-```javascript
-const browser = await puppeteer.connect({
-  browserWSEndpoint: 'ws://127.0.0.1:9222/devtools/browser/<id>'
-});
-const pages = await browser.pages();
+## Cleanup
+
+```python
+await context.close()    # Closes browser process too
+await pw.stop()          # Stops Playwright server
 ```
 
-## CDP Domains for Work4Me
-
-| Domain | Capabilities |
-|---|---|
-| `Page` | Navigation, screenshots, lifecycle events |
-| `Input` | Mouse events (click, move, drag), keyboard events (keyDown/keyUp) |
-| `DOM` | Query/modify DOM elements |
-| `Runtime` | Execute JavaScript in page context |
-| `Target` | Tab/window management (create, close, activate) |
-| `Network` | Request interception, monitoring |
+Unlike Chrome/CDP where you must `disconnect()` to keep the browser alive, with Playwright-managed Firefox, `context.close()` cleanly shuts down the browser process.
 
 ## Human-Like Browsing Patterns
 
@@ -109,15 +91,13 @@ await asyncio.sleep(reading_time)
 ### Tab Management
 
 - Open 3-5 tabs during a research session
-- Switch between tabs periodically (Ctrl+Tab or click via CDP)
+- Switch between tabs periodically (Ctrl+Tab or click)
 - Close completed tabs
 - Leave documentation tabs open during coding phases
 
-## Firefox Marionette (Alternative)
+## Wayland Notes
 
-Firefox supports remote debugging via `--marionette` flag (port 2828). Also supports WebDriver BiDi protocol. Playwright abstracts both Chrome and Firefox with the same API.
-
-**For Work4Me:** Chrome/Chromium is the pragmatic choice — CDP is more mature, more widely documented.
+Firefox auto-detects Wayland when `WAYLAND_DISPLAY` is set. The `MOZ_ENABLE_WAYLAND=1` environment variable can be set explicitly but is rarely needed on modern systems. Playwright's browser management is display-server agnostic.
 
 ## Browser Extensions (Future Enhancement)
 
@@ -128,21 +108,12 @@ Work4Me daemon  ←→  Native Messaging Host  ←→  WebExtension
                      (stdin/stdout JSON)         (tabs, scripting APIs)
 ```
 
-**APIs available:** `chrome.tabs`, `chrome.windows`, `chrome.scripting`, `chrome.webNavigation`, `chrome.history`
-
-**Auto-install:** Chrome `--load-extension=/path/to/extension` (unpacked)
+**APIs available:** `browser.tabs`, `browser.windows`, `browser.scripting`, `browser.webNavigation`, `browser.history`
 
 ## Pydoll Library (Reference)
 
-`pydoll` — Python library for realistic CDP interactions:
+`pydoll` — Python library for realistic browser interactions:
 - Variable keystroke timing (30-120ms)
 - Simulated typos (~2% error rate)
 - Physics-based scrolling
 - Can be used as reference implementation for behavior simulation
-
-## Wayland-Specific Notes
-
-- The `--ozone-platform=wayland` flag is required for native Wayland rendering
-- Without it, Chromium may try X11/XWayland and fail or render incorrectly
-- CDP WebSocket protocol itself is display-server agnostic
-- PipeWire integration for screen sharing works in Chromium on Wayland

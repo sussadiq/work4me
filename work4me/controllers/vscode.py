@@ -22,14 +22,16 @@ class VSCodeController:
         self._launch_on_start = config.launch_on_start
         self._lock = asyncio.Lock()
 
-    async def connect(self, retries: int = 5, delay: float = 2.0) -> None:
-        """Connect to the VS Code WebSocket bridge."""
+    async def connect(self, retries: int = 10, delay: float = 1.0) -> None:
+        """Connect to the VS Code WebSocket bridge with exponential backoff."""
         try:
             import websockets
         except ImportError:
             raise RuntimeError("websockets package required: pip install websockets")
 
         uri = f"ws://localhost:{self._port}"
+        current_delay = delay
+        max_delay = 5.0
         for attempt in range(retries):
             try:
                 self._ws = await websockets.connect(uri)
@@ -37,8 +39,12 @@ class VSCodeController:
                 return
             except (ConnectionRefusedError, OSError):
                 if attempt < retries - 1:
-                    logger.debug("VS Code bridge not ready, retry %d/%d", attempt + 1, retries)
-                    await asyncio.sleep(delay)
+                    logger.info(
+                        "VS Code bridge not ready, retry %d/%d in %.1fs",
+                        attempt + 1, retries, current_delay,
+                    )
+                    await asyncio.sleep(current_delay)
+                    current_delay = min(current_delay * 2, max_delay)
         raise ConnectionError(f"Cannot connect to VS Code bridge at {uri} after {retries} attempts")
 
     async def launch(self, working_dir: str = ".") -> None:

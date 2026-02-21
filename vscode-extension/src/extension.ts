@@ -3,6 +3,8 @@ import * as vscode from 'vscode';
 import { WebSocketServer, WebSocket } from 'ws';
 
 let wss: WebSocketServer | null = null;
+let outputChannel: vscode.OutputChannel | null = null;
+let statusBarItem: vscode.StatusBarItem | null = null;
 
 interface Command {
   id: string;
@@ -17,13 +19,74 @@ interface Response {
   error?: string;
 }
 
+function log(msg: string): void {
+  const ts = new Date().toISOString();
+  const line = `[${ts}] ${msg}`;
+  outputChannel?.appendLine(line);
+  console.log(`[Work4Me] ${msg}`);
+}
+
+function setStatus(text: string, tooltip: string, color?: string | vscode.ThemeColor): void {
+  if (!statusBarItem) return;
+  statusBarItem.text = `$(plug) ${text}`;
+  statusBarItem.tooltip = tooltip;
+  statusBarItem.color = color;
+}
+
 export function activate(context: vscode.ExtensionContext) {
+  // Output channel for visible logging
+  outputChannel = vscode.window.createOutputChannel('Work4Me Bridge');
+  context.subscriptions.push(outputChannel);
+
+  // Status bar item
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  statusBarItem.command = 'work4me.status';
+  statusBarItem.show();
+  context.subscriptions.push(statusBarItem);
+
+  setStatus('Starting...', 'Work4Me Bridge: starting');
+
+  // Register the status command
+  const statusCmd = vscode.commands.registerCommand('work4me.status', () => {
+    const port = vscode.workspace.getConfiguration('work4me').get<number>('port', 9876);
+    const connected = wss !== null;
+    const clients = wss ? wss.clients.size : 0;
+    vscode.window.showInformationMessage(
+      `Work4Me Bridge: ${connected ? 'listening' : 'not running'} on port ${port}, ${clients} client(s)`
+    );
+  });
+  context.subscriptions.push(statusCmd);
+
   const port = vscode.workspace.getConfiguration('work4me').get<number>('port', 9876);
 
-  wss = new WebSocketServer({ port });
-  console.log(`Work4Me bridge listening on ws://localhost:${port}`);
+  log(`Starting WebSocket server on port ${port}...`);
+
+  try {
+    wss = new WebSocketServer({ port });
+  } catch (err: unknown) {
+    const msg = `Failed to create WebSocket server on port ${port}: ${err}`;
+    log(msg);
+    setStatus('Error', msg, new vscode.ThemeColor('errorForeground'));
+    vscode.window.showErrorMessage(`Work4Me Bridge: ${msg}`);
+    return;
+  }
+
+  wss.on('error', (err: Error) => {
+    const msg = `WebSocket server error: ${err.message}`;
+    log(msg);
+    setStatus('Error', msg, new vscode.ThemeColor('errorForeground'));
+    vscode.window.showErrorMessage(`Work4Me Bridge: ${msg}`);
+  });
+
+  wss.on('listening', () => {
+    log(`WebSocket server listening on ws://localhost:${port}`);
+    setStatus(`Port ${port}`, `Work4Me Bridge: listening on port ${port}`);
+  });
 
   wss.on('connection', (ws: WebSocket) => {
+    log('Client connected');
+    setStatus(`Port ${port} (1)`, `Work4Me Bridge: client connected on port ${port}`);
+
     ws.on('message', async (data: Buffer) => {
       let cmd: Command;
       try {
@@ -35,9 +98,22 @@ export function activate(context: vscode.ExtensionContext) {
       const response = await handleCommand(cmd);
       ws.send(JSON.stringify(response));
     });
+
+    ws.on('close', () => {
+      log('Client disconnected');
+      const clients = wss ? wss.clients.size : 0;
+      setStatus(`Port ${port}${clients > 0 ? ` (${clients})` : ''}`,
+        `Work4Me Bridge: ${clients} client(s) on port ${port}`);
+    });
   });
 
-  context.subscriptions.push({ dispose: () => wss?.close() });
+  context.subscriptions.push({ dispose: () => {
+    if (wss) {
+      log('Shutting down WebSocket server');
+      wss.close();
+      wss = null;
+    }
+  }});
 }
 
 async function handleCommand(cmd: Command): Promise<Response> {

@@ -14,8 +14,7 @@ work4me (main daemon)                     # Python asyncio, single process
   |     +-- work4me-bridge extension      # WebSocket server on port 9876
   |     +-- integrated terminal           # Visible terminal commands
   |
-  +-- chromium --remote-debugging-port    # Browser (launched at startup)
-        =9222 --ozone-platform=wayland
+  +-- firefox (via Playwright)             # Browser (launched at startup)
 ```
 
 **Single asyncio process.** All concurrency is cooperative coroutines. External tools run as OS subprocesses via `asyncio.create_subprocess_exec`. No multiprocessing — workload is 100% I/O-bound.
@@ -26,7 +25,7 @@ work4me (main daemon)                     # Python asyncio, single process
 |---|---|
 | Daemon ↔ Claude CLI | stdin/stdout pipes, stream-json parsing |
 | Daemon ↔ VS Code | WebSocket (work4me-bridge extension, port 9876) |
-| Daemon ↔ Browser | WebSocket CDP via Playwright `connect_over_cdp` |
+| Daemon ↔ Browser | Playwright `firefox.launch_persistent_context` (managed) |
 | Daemon ↔ Desktop | D-Bus via `dbus_next` (RemoteDesktop portal) |
 | Daemon ↔ ydotool | Subprocess calls (fallback input method) |
 | CLI ↔ Daemon | Unix socket at `$XDG_RUNTIME_DIR/work4me/daemon.sock` |
@@ -70,7 +69,7 @@ work4me/
 
   controllers/
     vscode.py              # VS Code control via WebSocket bridge extension
-    browser.py             # Chromium via CDP/Playwright
+    browser.py             # Firefox via Playwright
     terminal.py            # tmux session management (fallback)
     editor.py              # Neovim RPC (fallback)
     claude_code.py         # Claude Code CLI subprocess management
@@ -424,7 +423,7 @@ compositor = "auto"
 input_method = "auto"
 terminal = "auto"
 editor = "neovim"
-browser = "chromium"
+browser = "firefox"
 
 [claude]
 cli_path = "claude"

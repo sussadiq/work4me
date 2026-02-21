@@ -64,7 +64,7 @@ class DesktopConfig:
     input_method: str = "auto"
     terminal: str = "auto"
     editor: str = "vscode"
-    browser: str = "chromium"
+    browser: str = "firefox"
 
 
 @dataclass
@@ -78,16 +78,10 @@ class VSCodeConfig:
 
 @dataclass
 class BrowserConfig:
-    chromium_path: str = "google-chrome"
-    debug_port: int = 9222
     enabled: bool = True
-    ozone_platform: str = "wayland"
     user_data_dir: str = ""
-    profile_directory: str = ""
-    window_class: str = "google-chrome"
-    cdp_max_retries: int = 5
-    cdp_retry_base_delay: float = 1.0
-    cdp_initial_wait: float = 2.0
+    window_class: str = "firefox"
+    launch_timeout: float = 30000.0
 
 
 @dataclass

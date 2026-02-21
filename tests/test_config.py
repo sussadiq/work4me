@@ -18,12 +18,10 @@ def test_vscode_config_defaults():
 
 def test_browser_config_defaults():
     config = BrowserConfig()
-    assert config.chromium_path == "google-chrome"
-    assert config.debug_port == 9222
     assert config.enabled is True
     assert config.user_data_dir == ""
-    assert config.profile_directory == ""
-    assert config.window_class == "google-chrome"
+    assert config.window_class == "firefox"
+    assert config.launch_timeout == 30000.0
 
 
 def test_claude_config_no_budget_cap():
@@ -88,8 +86,8 @@ def test_claude_config_retry_defaults():
     assert config.plan_retry_base_delay == 2.0
 
 
-def test_browser_config_cdp_retry_defaults():
+def test_browser_config_has_no_cdp_fields():
     config = BrowserConfig()
-    assert config.cdp_max_retries == 5
-    assert config.cdp_retry_base_delay == 1.0
-    assert config.cdp_initial_wait == 2.0
+    assert not hasattr(config, "cdp_max_retries")
+    assert not hasattr(config, "chromium_path")
+    assert not hasattr(config, "debug_port")
