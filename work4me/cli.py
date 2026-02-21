@@ -36,6 +36,13 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument(
         "--max-budget", type=float, default=5.0, help="Max Claude API cost in USD"
     )
+    start.add_argument(
+        "--mode", type=str, choices=["manual", "ai-assisted"],
+        default="manual", help="Operating mode (default: manual)"
+    )
+    start.add_argument(
+        "--dir", type=str, default=".", help="Working directory for the project"
+    )
     start.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
 
     # stop
@@ -60,9 +67,11 @@ def setup_logging(verbose: bool = False) -> None:
 
 
 async def cmd_start(args: argparse.Namespace) -> int:
+    working_dir = getattr(args, "dir", ".") or args.working_dir
     config = Config(
-        working_dir=str(Path(args.working_dir).resolve()),
+        working_dir=str(Path(working_dir).resolve()),
         default_hours=args.hours,
+        mode=args.mode,
     )
     config.claude.model = args.model
     config.claude.max_budget_usd = args.max_budget
@@ -74,6 +83,7 @@ async def cmd_start(args: argparse.Namespace) -> int:
         await orchestrator.run(
             task_description=args.task,
             time_budget_minutes=int(args.hours * 60),
+            working_dir=config.working_dir,
         )
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
@@ -87,8 +97,7 @@ async def cmd_doctor(_args: argparse.Namespace) -> int:
         ("python3", "Python 3.11+"),
         ("node", "Node.js 18+"),
         ("claude", "Claude Code CLI"),
-        ("tmux", "tmux"),
-        ("nvim", "Neovim"),
+        ("code", "VS Code"),
         ("ydotool", "ydotool"),
         ("wl-copy", "wl-clipboard"),
     ]
@@ -127,6 +136,29 @@ async def cmd_doctor(_args: argparse.Namespace) -> int:
     return 0 if all_ok else 1
 
 
+async def cmd_stop(_args: argparse.Namespace) -> int:
+    config = Config()
+    sock_path = config.runtime_dir / "daemon.sock"
+    if not sock_path.exists():
+        print("No active session to stop.")
+        return 1
+
+    try:
+        reader, writer = await asyncio.open_unix_connection(str(sock_path))
+        writer.write(b"stop\n")
+        await writer.drain()
+        response = await asyncio.wait_for(reader.readline(), timeout=5.0)
+        print(response.decode().strip())
+        writer.close()
+        await writer.wait_closed()
+    except (ConnectionRefusedError, FileNotFoundError):
+        print("No active session to stop.")
+        return 1
+    except TimeoutError:
+        print("Stop command sent but no response received.")
+    return 0
+
+
 async def cmd_status(_args: argparse.Namespace) -> int:
     config = Config()
     state_file = config.runtime_dir / "state.json"
@@ -150,7 +182,7 @@ def main() -> None:
 
     commands = {
         "start": cmd_start,
-        "stop": lambda a: asyncio.coroutine(lambda: 0)(),
+        "stop": cmd_stop,
         "status": cmd_status,
         "doctor": cmd_doctor,
     }

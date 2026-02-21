@@ -11,7 +11,8 @@ license = "MIT"
 dependencies = [
     "libtmux>=0.37",
     "pynvim>=0.5",
-    "numpy>=1.26",
+    "websockets>=12.0",
+    "playwright>=1.40",
 ]
 
 [project.optional-dependencies]
