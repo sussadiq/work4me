@@ -1,8 +1,9 @@
 # tests/test_cli.py
 import argparse
+import logging
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from work4me.cli import build_parser, cmd_start
+from work4me.cli import build_parser, cmd_start, setup_logging
 from work4me.config import Config
 
 
@@ -64,3 +65,12 @@ async def test_cmd_start_no_config_flag(tmp_path):
             )
             await cmd_start(args)
             mock_load.assert_called_once_with(None)
+
+
+def test_setup_logging_applies_config_log_level():
+    """setup_logging should use log_level from config when not verbose."""
+    setup_logging(verbose=False, log_level="DEBUG")
+    root = logging.getLogger()
+    assert root.level == logging.DEBUG
+    # Restore
+    setup_logging(verbose=False, log_level="INFO")

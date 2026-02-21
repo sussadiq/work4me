@@ -56,3 +56,14 @@ def test_total_time_within_budget(scheduler, plan):
     schedule = scheduler.build_schedule(plan, total_minutes=240)
     total = sum(s.duration_minutes + s.break_after_minutes for s in schedule.sessions)
     assert total <= 260  # some slack for noise
+
+
+def test_schedule_uses_session_config_values(plan):
+    """Custom SessionConfig should affect session count and durations."""
+    config = SessionConfig(duration_mean=30, duration_sigma=3, break_mean=5,
+                           break_sigma=1, sessions_per_4_hours=6)
+    scheduler = Scheduler(config)
+    schedule = scheduler.build_schedule(plan, total_minutes=240)
+    # With sessions_per_4_hours=6, expect ~6 sessions
+    assert len(schedule.sessions) >= 4
+    assert len(schedule.sessions) <= 6

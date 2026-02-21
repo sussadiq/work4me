@@ -72,3 +72,20 @@ def test_apply_speed_fast():
     engine = BehaviorEngine(config)
     engine.speed_multiplier = 0.5
     assert engine._apply_speed(1.0) == pytest.approx(0.5, abs=0.001)
+
+
+def test_engine_apply_adjustment_add_idle():
+    config = Config()
+    engine = BehaviorEngine(config)
+    original = engine.speed_multiplier
+    engine.apply_adjustment(BehaviorAdjustment.ADD_IDLE)
+    assert engine.speed_multiplier > original
+    assert engine.speed_multiplier == pytest.approx(1.15, abs=0.01)
+
+
+def test_engine_apply_adjustment_add_variation():
+    config = Config()
+    engine = BehaviorEngine(config)
+    engine.apply_adjustment(BehaviorAdjustment.ADD_VARIATION)
+    # Should be nudged somewhere within bounds
+    assert 0.5 <= engine.speed_multiplier <= 3.0

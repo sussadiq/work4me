@@ -112,11 +112,11 @@ class ActivityMonitor:
         var = self.variance()
         kb, mouse = self.keyboard_mouse_balance()
 
-        if ratio > 0.80:
+        if ratio > self._config.target_ratio_max + 0.10:
             return BehaviorAdjustment.SLOW_DOWN
-        if ratio < 0.30 and len(self._events) > 2:
+        if ratio < self._config.target_ratio_min - 0.10 and len(self._events) > 2:
             return BehaviorAdjustment.SPEED_UP
-        if var < 0.04 and len(self._events) > 60:
+        if var < self._config.variance_min and len(self._events) > 60:
             return BehaviorAdjustment.ADD_VARIATION
         if kb > 0.90 and mouse < 0.10 and len(self._events) > 100:
             return BehaviorAdjustment.ADD_MOUSE

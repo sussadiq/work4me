@@ -41,6 +41,11 @@ class BehaviorEngine:
             self.speed_multiplier = min(3.0, self.speed_multiplier * 1.3)
         elif adjustment == BehaviorAdjustment.SPEED_UP:
             self.speed_multiplier = max(0.5, self.speed_multiplier * 0.8)
+        elif adjustment == BehaviorAdjustment.ADD_IDLE:
+            self.speed_multiplier = min(3.0, self.speed_multiplier * 1.15)
+        elif adjustment == BehaviorAdjustment.ADD_VARIATION:
+            nudge = random.uniform(-0.15, 0.15)
+            self.speed_multiplier = max(0.5, min(3.0, self.speed_multiplier + nudge))
         elif adjustment == BehaviorAdjustment.NONE:
             self.speed_multiplier += (1.0 - self.speed_multiplier) * 0.1
 

@@ -85,21 +85,27 @@ class Scheduler:
         return Schedule(sessions=sessions, total_budget_minutes=total_minutes)
 
     def _generate_session_durations(self, total_minutes: float) -> list[tuple[float, float]]:
-        """Generate session durations with Gaussian noise, scaled to budget."""
-        # Scale number of sessions with budget (1 session per ~60 min, min 2, max 6)
-        num_sessions = max(2, min(6, round(total_minutes / 60)))
-        scale = total_minutes / 240.0
+        """Generate session durations from SessionConfig with Gaussian noise."""
+        # Derive number of sessions from config, scaled to budget
+        num_sessions = max(2, min(6, round(
+            self._config.sessions_per_4_hours * (total_minutes / 240.0)
+        )))
+        scale = total_minutes / (num_sessions * self._config.duration_mean)
         results = []
         for i in range(num_sessions):
-            tmpl_idx = i % len(SESSION_TEMPLATES)
-            mean, sigma, lo, hi = SESSION_TEMPLATES[tmpl_idx]
-            bmean, bsigma, blo, bhi = BREAK_TEMPLATES[tmpl_idx]
-            dur = max(lo, min(hi, self._rng.gauss(mean, sigma))) * scale
+            # Per-session variation from config
+            dur = self._rng.gauss(self._config.duration_mean, self._config.duration_sigma)
+            dur = max(self._config.duration_mean * 0.5, min(self._config.duration_mean * 1.5, dur))
+            dur *= scale
+
             # No break after last session
             if i == num_sessions - 1:
-                brk = 0
+                brk = 0.0
             else:
-                brk = max(blo, min(bhi, self._rng.gauss(bmean, bsigma))) * scale if bmean > 0 else 0
+                brk = self._rng.gauss(self._config.break_mean, self._config.break_sigma)
+                brk = max(self._config.break_mean * 0.5, min(self._config.break_mean * 2.0, brk))
+                brk *= scale
+
             results.append((dur, brk))
         return results
 

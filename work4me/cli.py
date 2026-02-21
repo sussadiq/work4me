@@ -59,18 +59,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def setup_logging(verbose: bool = False) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
+def setup_logging(verbose: bool = False, log_level: str = "INFO") -> None:
+    if verbose:
+        level = logging.DEBUG
+    else:
+        level = getattr(logging, log_level.upper(), logging.INFO)
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         datefmt="%H:%M:%S",
+        force=True,
     )
 
 
 async def cmd_start(args: argparse.Namespace) -> int:
     config_path = Path(args.config) if getattr(args, "config", None) else None
     config = load_config(config_path)
+
+    # Apply config log_level (reconfigure since basicConfig already called)
+    setup_logging(verbose=getattr(args, "verbose", False), log_level=config.log_level)
 
     # CLI flags override TOML values
     working_dir = args.working_dir

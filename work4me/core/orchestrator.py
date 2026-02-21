@@ -486,6 +486,12 @@ class Orchestrator:
             await self._behavior.idle_think(15.0)
         elif adjustment == BehaviorAdjustment.ADD_MOUSE:
             self._activity_monitor.record_event("mouse")
+        elif adjustment == BehaviorAdjustment.ADD_IDLE:
+            logger.debug("Adding idle period for variation")
+            await self._behavior.idle_think(10.0)
+        elif adjustment == BehaviorAdjustment.ADD_VARIATION:
+            logger.debug("Adding timing variation")
+            await self._behavior.pause_natural(1.0, 5.0)
 
     # ------------------------------------------------------------------
     # Controller watchdog

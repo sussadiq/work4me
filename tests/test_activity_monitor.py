@@ -50,3 +50,27 @@ def test_recommended_adjustment_too_low(monitor):
         monitor.record_event("keyboard", now - 600 + i * 100)
     adj = monitor.recommended_adjustment()
     assert adj == BehaviorAdjustment.SPEED_UP
+
+
+def test_recommended_adjustment_uses_config_max():
+    """Custom config with lower target_ratio_max should trigger SLOW_DOWN earlier."""
+    config = ActivityConfig(target_ratio_max=0.50)
+    monitor = ActivityMonitor(config)
+    now = time.time()
+    # Activity ratio ~0.60 — above 0.50 + 0.10 = 0.60 threshold
+    for i in range(370):
+        monitor.record_event("keyboard", now - 600 + i)
+    adj = monitor.recommended_adjustment()
+    assert adj == BehaviorAdjustment.SLOW_DOWN
+
+
+def test_recommended_adjustment_uses_config_min():
+    """Custom config with higher target_ratio_min should trigger SPEED_UP earlier."""
+    config = ActivityConfig(target_ratio_min=0.50)
+    monitor = ActivityMonitor(config)
+    now = time.time()
+    # Activity ratio ~0.35 — below 0.50 - 0.10 = 0.40 threshold
+    for i in range(3):
+        monitor.record_event("keyboard", now - 600 + i * 200)
+    adj = monitor.recommended_adjustment()
+    assert adj == BehaviorAdjustment.SPEED_UP
