@@ -145,3 +145,59 @@ async def test_retry_exhausted_raises():
     with patch("work4me.core.orchestrator.asyncio.sleep", new_callable=AsyncMock):
         with pytest.raises(RuntimeError, match="Persistent failure"):
             await orch._execute_activity_with_retry(activity, "/tmp", max_retries=2)
+
+
+@pytest.mark.asyncio
+async def test_run_checks_for_recovery():
+    """run() should call check_for_recovery at startup."""
+    from work4me.core.state import StateSnapshot
+
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+
+    # Mock check_for_recovery to track it was called
+    called = []
+    def tracking_check():
+        called.append(True)
+        return None  # No recovery needed
+    orch.check_for_recovery = tracking_check
+
+    # Mock everything else to avoid actual execution
+    orch._initialize = AsyncMock()
+    orch._start_watchdog = AsyncMock()
+    orch._stop_watchdog = AsyncMock()
+    orch._plan = AsyncMock(return_value=Schedule(sessions=[], total_budget_minutes=60))
+    orch._wrap_up = AsyncMock()
+    orch._cleanup = AsyncMock()
+    orch._persist_state = MagicMock()
+
+    await orch.run("test task", 60, "/tmp")
+    assert len(called) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_resumes_from_recovery():
+    """run() should restore snapshot when recovering a resumable session."""
+    from work4me.core.state import StateSnapshot, State
+
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+
+    # Provide a resumable snapshot
+    snap = StateSnapshot()
+    snap.state = State.WORKING.value
+    snap.task_description = "Recovered task"
+    snap.current_activity_index = 2
+    orch.check_for_recovery = lambda: snap
+
+    orch._initialize = AsyncMock()
+    orch._start_watchdog = AsyncMock()
+    orch._stop_watchdog = AsyncMock()
+    orch._plan = AsyncMock(return_value=Schedule(sessions=[], total_budget_minutes=60))
+    orch._wrap_up = AsyncMock()
+    orch._cleanup = AsyncMock()
+    orch._persist_state = MagicMock()
+
+    await orch.run("test task", 60, "/tmp")
+    assert orch.snapshot.task_description == "Recovered task"
+    assert orch.snapshot.current_activity_index == 2

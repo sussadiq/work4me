@@ -102,6 +102,16 @@ class Orchestrator:
             await self._initialize(working_dir)
             await self._start_watchdog()
 
+            # Check for crash recovery
+            recovered = self.check_for_recovery()
+            if recovered:
+                logger.info(
+                    "Recovering previous session at activity %d: %s",
+                    recovered.current_activity_index,
+                    recovered.task_description[:60],
+                )
+                self.snapshot = recovered
+
             # PLANNING
             self._transition("setup_complete")
             schedule = await self._plan(task_description, time_budget_minutes, working_dir)
