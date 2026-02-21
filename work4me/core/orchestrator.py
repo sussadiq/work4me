@@ -69,6 +69,9 @@ class Orchestrator:
         self._start_time: float = 0
         self._time_budget_seconds: float = 0
 
+        # Watchdog
+        self._watchdog_task: asyncio.Task | None = None
+
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
@@ -97,6 +100,7 @@ class Orchestrator:
             # INITIALIZING
             self._transition("start_task")
             await self._initialize(working_dir)
+            await self._start_watchdog()
 
             # PLANNING
             self._transition("setup_complete")
@@ -133,6 +137,7 @@ class Orchestrator:
             if self.state_machine.can_transition("error"):
                 self._transition("error")
         finally:
+            await self._stop_watchdog()
             await self._cleanup()
             self._persist_state()
 
@@ -429,6 +434,54 @@ class Orchestrator:
             await self._behavior.idle_think(15.0)
         elif adjustment == BehaviorAdjustment.ADD_MOUSE:
             self._activity_monitor.record_event("mouse")
+
+    # ------------------------------------------------------------------
+    # Controller watchdog
+    # ------------------------------------------------------------------
+
+    async def _start_watchdog(self) -> None:
+        self._watchdog_task = asyncio.create_task(self._watchdog_loop())
+
+    async def _stop_watchdog(self) -> None:
+        if self._watchdog_task and not self._watchdog_task.done():
+            self._watchdog_task.cancel()
+            try:
+                await self._watchdog_task
+            except asyncio.CancelledError:
+                pass
+        self._watchdog_task = None
+
+    async def _watchdog_loop(self) -> None:
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await self._watchdog_tick()
+            except Exception:
+                logger.warning("Watchdog tick failed", exc_info=True)
+
+    async def _watchdog_tick(self) -> None:
+        """Check controller health and restart if needed."""
+        try:
+            vs_ok = await self._vscode.health_check()
+        except Exception:
+            vs_ok = False
+        if not vs_ok:
+            logger.warning("VS Code unhealthy, restarting...")
+            try:
+                await self._vscode.restart()
+            except Exception:
+                logger.error("VS Code restart failed", exc_info=True)
+
+        try:
+            br_ok = await self._browser_ctrl.health_check()
+        except Exception:
+            br_ok = False
+        if not br_ok:
+            logger.warning("Browser unhealthy, restarting...")
+            try:
+                await self._browser_ctrl.restart()
+            except Exception:
+                logger.error("Browser restart failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Cleanup and state management

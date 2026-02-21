@@ -80,3 +80,29 @@ async def test_execute_activity_browser(orchestrator):
 
     await orchestrator._execute_activity(activity, working_dir="/tmp")
     orchestrator._browser_ctrl.search.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_watchdog_tick_healthy():
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+    orch._vscode = AsyncMock()
+    orch._vscode.health_check = AsyncMock(return_value=True)
+    orch._browser_ctrl = AsyncMock()
+    orch._browser_ctrl.health_check = AsyncMock(return_value=True)
+    await orch._watchdog_tick()
+    orch._vscode.restart.assert_not_called()
+    orch._browser_ctrl.restart.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_watchdog_tick_unhealthy_vscode():
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+    orch._vscode = AsyncMock()
+    orch._vscode.health_check = AsyncMock(return_value=False)
+    orch._vscode.restart = AsyncMock()
+    orch._browser_ctrl = AsyncMock()
+    orch._browser_ctrl.health_check = AsyncMock(return_value=True)
+    await orch._watchdog_tick()
+    orch._vscode.restart.assert_called_once()
