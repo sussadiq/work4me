@@ -56,6 +56,7 @@ class ClaudeCodeManager:
         self.config = config
         self._process: asyncio.subprocess.Process | None = None
         self._last_session_id: str = ""
+        self._collected_texts: list[str] = []
 
     def _build_command(
         self,
@@ -134,6 +135,7 @@ class ClaudeCodeManager:
             await self._process.wait()
             result.exit_code = self._process.returncode or 0
             result.session_id = self._last_session_id
+            result.raw_text = "\n".join(self._collected_texts)
 
             if result.exit_code != 0:
                 stderr_bytes = await self._process.stderr.read()
@@ -211,6 +213,7 @@ class ClaudeCodeManager:
         Deduplicates by tracking tool_use IDs already seen.
         """
         seen_tool_ids: set[str] = set()
+        self._collected_texts = []
 
         async for raw_line in stdout:
             line = raw_line.decode(errors="replace").strip()
@@ -223,12 +226,37 @@ class ClaudeCodeManager:
                 logger.debug("Non-JSON line from Claude: %s", line[:100])
                 continue
 
+            self._collected_texts.extend(self._extract_text_blocks(event))
+
             for action in self._extract_actions(event):
                 # Deduplicate using a hash of the action content
                 action_key = f"{action.kind.value}:{action.file_path}:{action.command}:{hash(action.new_string or action.content)}"
                 if action_key not in seen_tool_ids:
                     seen_tool_ids.add(action_key)
                     yield action
+
+    def _extract_text_blocks(self, event: dict) -> list[str]:
+        """Extract text content blocks from a stream-json event."""
+        texts: list[str] = []
+        event_type = event.get("type", "")
+
+        if event_type == "assistant":
+            content = event.get("message", {}).get("content", [])
+        elif event_type == "result":
+            session_id = event.get("session_id", "")
+            if session_id:
+                self._last_session_id = session_id
+            content = event.get("content", [])
+        else:
+            return texts
+
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if text:
+                        texts.append(text)
+        return texts
 
     def _extract_actions(self, event: dict) -> list[CapturedAction]:
         """Extract CapturedActions from a stream-json event.
