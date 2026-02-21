@@ -189,7 +189,35 @@ class Orchestrator:
             except Exception:
                 logger.warning("Could not launch browser — continuing without it")
 
+        # Auto-install GNOME focus extension if needed
+        await self._ensure_gnome_extension()
+
         logger.info("Desktop environment ready")
+
+    async def _ensure_gnome_extension(self) -> None:
+        """Install the bundled GNOME Shell focus extension if on GNOME."""
+        import os
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
+        if "GNOME" not in desktop:
+            return
+
+        from work4me.doctor import DoctorChecks
+        dc = DoctorChecks()
+        check = dc.check_gnome_extension()
+        if check.passed:
+            return
+
+        logger.info("Installing work4me-focus GNOME extension...")
+        result = DoctorChecks.install_gnome_extension()
+        if result.passed and "needs_restart" in result.detail:
+            logger.warning(
+                "GNOME extension installed but requires session restart "
+                "(log out and back in) — window switching disabled this session"
+            )
+        elif result.passed:
+            logger.info("GNOME extension installed: %s", result.detail)
+        else:
+            logger.warning("GNOME extension install failed: %s", result.detail)
 
     # ------------------------------------------------------------------
     # Planning
@@ -201,14 +229,23 @@ class Orchestrator:
         time_budget_minutes: int,
         working_dir: str,
     ) -> Schedule:
-        """Decompose task into activities and build schedule."""
+        """Decompose task into activities and build schedule.
+
+        Falls back to a minimal single-activity plan if the planner
+        fails after all retries, so one transient failure never kills
+        the entire session.
+        """
         logger.info("Planning task decomposition...")
 
-        plan = await self._planner.decompose(
-            task_description=task_description,
-            time_budget_hours=time_budget_minutes / 60.0,
-            working_dir=working_dir,
-        )
+        try:
+            plan = await self._planner.decompose(
+                task_description=task_description,
+                time_budget_hours=time_budget_minutes / 60.0,
+                working_dir=working_dir,
+            )
+        except Exception as exc:
+            logger.error("Planning failed, using fallback plan: %s", exc)
+            return self._fallback_plan(task_description, time_budget_minutes)
 
         logger.info(
             "Task decomposed into %d activities (%.0f min estimated)",
@@ -222,6 +259,29 @@ class Orchestrator:
             len(schedule.sessions),
         )
 
+        return schedule
+
+    def _fallback_plan(
+        self,
+        task_description: str,
+        time_budget_minutes: int,
+    ) -> Schedule:
+        """Create a minimal fallback schedule with a single CODING activity."""
+        coding_minutes = int(time_budget_minutes * 0.70)
+        activity = Activity(
+            kind=ActivityKind.CODING,
+            description=task_description,
+            estimated_minutes=coding_minutes,
+            files_involved=[],
+            commands=[],
+            search_queries=[],
+            dependencies=[],
+        )
+        plan = TaskPlan(task_description=task_description, activities=[activity])
+        schedule = self._scheduler.build_schedule(plan, total_minutes=time_budget_minutes)
+        logger.info(
+            "Fallback plan: 1 CODING activity, %d min", coding_minutes,
+        )
         return schedule
 
     # ------------------------------------------------------------------
@@ -328,9 +388,17 @@ class Orchestrator:
     # Window focus
     # ------------------------------------------------------------------
 
-    async def _focus_app_window(self, window_class: str) -> None:
+    def _vscode_title_hint(self) -> str:
+        """Return the project directory name for VS Code window matching."""
+        return Path(self.snapshot.working_dir).resolve().name
+
+    async def _focus_app_window(
+        self, window_class: str, *, title_hint: str = "",
+    ) -> None:
         """Raise the OS window for the given WM_CLASS."""
-        focused = await self._window_mgr.focus_window(window_class)
+        focused = await self._window_mgr.focus_window(
+            window_class, title_hint=title_hint,
+        )
         if focused:
             await self._behavior.pause_natural(0.3, 0.8)
 
@@ -340,7 +408,9 @@ class Orchestrator:
 
     async def _execute_coding_manual(self, activity: Activity, working_dir: str) -> None:
         """Mode A: headless Claude Code → replay edits in VS Code."""
-        await self._focus_app_window(self.config.vscode.window_class)
+        await self._focus_app_window(
+            self.config.vscode.window_class, title_hint=self._vscode_title_hint(),
+        )
         prompt = self._build_activity_prompt(activity)
 
         result = await self._claude.execute(
@@ -404,7 +474,9 @@ class Orchestrator:
 
     async def _execute_coding_ai_assisted(self, activity: Activity, working_dir: str) -> None:
         """Mode B: type prompts into visible Claude Code terminal session."""
-        await self._focus_app_window(self.config.vscode.window_class)
+        await self._focus_app_window(
+            self.config.vscode.window_class, title_hint=self._vscode_title_hint(),
+        )
         prompt = self._build_activity_prompt(activity)
 
         # Type the prompt into the VS Code terminal (visible Claude Code session)
@@ -468,7 +540,9 @@ class Orchestrator:
 
     async def _execute_terminal(self, activity: Activity, working_dir: str) -> None:
         """Run commands in VS Code integrated terminal."""
-        await self._focus_app_window(self.config.vscode.window_class)
+        await self._focus_app_window(
+            self.config.vscode.window_class, title_hint=self._vscode_title_hint(),
+        )
         try:
             await self._vscode.show_terminal()
         except Exception as exc:
@@ -491,7 +565,9 @@ class Orchestrator:
 
     async def _execute_reading(self, activity: Activity) -> None:
         """Open and scroll through files in VS Code."""
-        await self._focus_app_window(self.config.vscode.window_class)
+        await self._focus_app_window(
+            self.config.vscode.window_class, title_hint=self._vscode_title_hint(),
+        )
         await self._vscode.focus_editor()
 
         for file_path in activity.files_involved[:5]:

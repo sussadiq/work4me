@@ -51,6 +51,8 @@ class SessionResult:
 class ClaudeCodeManager:
     """Manages Claude Code CLI as a subprocess."""
 
+    _STREAM_BUFFER_LIMIT = 4 * 1024 * 1024  # 4 MB
+
     def __init__(self, config: ClaudeConfig) -> None:
         self.config = config
         self._process: asyncio.subprocess.Process | None = None
@@ -123,6 +125,7 @@ class ClaudeCodeManager:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=working_dir,
+                limit=self._STREAM_BUFFER_LIMIT,
             )
 
             if self._process.stdout is None:
@@ -175,11 +178,35 @@ class ClaudeCodeManager:
         streaming events like content_block_start which have empty input).
 
         Deduplicates by tracking tool_use IDs already seen.
+
+        Uses explicit readline() loop so that LimitOverrunError from
+        oversized lines can be caught and recovered per-line instead of
+        crashing the entire stream.
         """
         seen_tool_ids: set[str] = set()
         self._collected_texts = []
 
-        async for raw_line in stdout:
+        while True:
+            try:
+                raw_line = await stdout.readline()
+            except asyncio.LimitOverrunError as exc:
+                # Line exceeded buffer limit — drain the oversized chunk
+                # and continue with the next line.
+                logger.warning(
+                    "Oversized stream line (%d bytes consumed), skipping",
+                    exc.consumed,
+                )
+                try:
+                    await stdout.read(exc.consumed)
+                    # Read until the actual newline delimiter
+                    await stdout.readline()
+                except Exception:
+                    pass
+                continue
+
+            if not raw_line:
+                break  # EOF
+
             line = raw_line.decode(errors="replace").strip()
             if not line:
                 continue

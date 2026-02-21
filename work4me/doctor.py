@@ -1,9 +1,19 @@
 """System health checks for Work4Me dependencies."""
 
+import logging
 import os
 import shutil
+import subprocess
+import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+_EXT_UUID = "work4me-focus@work4me"
+_EXT_INSTALL_DIR = Path.home() / ".local/share/gnome-shell/extensions" / _EXT_UUID
+_EXT_BUNDLE_DIR = Path(__file__).parent / "desktop" / "gnome-ext"
 
 
 @dataclass
@@ -56,6 +66,79 @@ class DoctorChecks:
                     return CheckResult("VS Code Extension", True, str(d))
         return CheckResult("VS Code Extension", False, "not installed")
 
+    def check_gnome_extension(self) -> CheckResult:
+        """Check if the work4me-focus GNOME Shell extension is installed and active."""
+        try:
+            result = subprocess.run(
+                ["gnome-extensions", "info", _EXT_UUID],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and "STATE: ACTIVE" in result.stdout.upper():
+                return CheckResult("GNOME Extension", True, "active")
+            if result.returncode == 0:
+                return CheckResult("GNOME Extension", False, "installed but not active")
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        if _EXT_INSTALL_DIR.exists():
+            return CheckResult("GNOME Extension", False, "installed but not active")
+        return CheckResult("GNOME Extension", False, "not installed")
+
+    @staticmethod
+    def install_gnome_extension() -> CheckResult:
+        """Install bundled extension via gnome-extensions CLI and enable it.
+
+        Uses ``gnome-extensions install`` with a zip file, which is the
+        official installation method.  On Wayland, GNOME Shell only
+        discovers new extensions after a session restart (log out / log in),
+        so this may return ``needs_restart`` in the detail field.
+        """
+        if not _EXT_BUNDLE_DIR.exists():
+            return CheckResult("GNOME Extension Install", False, "bundle not found")
+
+        # Build a zip from the bundled files
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                zip_path = tmp.name
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for src in _EXT_BUNDLE_DIR.iterdir():
+                    zf.write(src, src.name)
+        except OSError as exc:
+            return CheckResult("GNOME Extension Install", False, f"zip failed: {exc}")
+
+        # Install via gnome-extensions CLI (copies + notifies Shell)
+        try:
+            subprocess.run(
+                ["gnome-extensions", "install", "--force", zip_path],
+                capture_output=True, timeout=10,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            return CheckResult(
+                "GNOME Extension Install", False, f"install failed: {exc}",
+            )
+        finally:
+            Path(zip_path).unlink(missing_ok=True)
+
+        # Try to enable — may fail if Shell hasn't picked it up yet
+        try:
+            result = subprocess.run(
+                ["gnome-extensions", "enable", _EXT_UUID],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                return CheckResult("GNOME Extension Install", True, str(_EXT_INSTALL_DIR))
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        # Extension installed but Shell hasn't discovered it yet (Wayland)
+        if _EXT_INSTALL_DIR.exists():
+            return CheckResult(
+                "GNOME Extension Install", True,
+                "needs_restart — log out and back in to activate",
+            )
+
+        return CheckResult("GNOME Extension Install", False, "install failed")
+
     def run_all(self) -> list[CheckResult]:
         results = []
         for cmd, label in self.BINARIES:
@@ -63,4 +146,8 @@ class DoctorChecks:
         results.append(self.check_uinput())
         results.append(self.check_wayland())
         results.append(self.check_vscode_extension())
+        # Only check GNOME extension on GNOME desktops
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").upper()
+        if "GNOME" in desktop:
+            results.append(self.check_gnome_extension())
         return results

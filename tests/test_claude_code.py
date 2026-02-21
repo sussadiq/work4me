@@ -1,6 +1,7 @@
 # tests/test_claude_code.py
 """Tests for ClaudeCodeManager stream parsing and text capture."""
 
+import asyncio
 import pytest
 from work4me.controllers.claude_code import ClaudeCodeManager, CapturedAction, ActionKind, ClaudeConfig
 
@@ -308,3 +309,65 @@ def test_build_command_max_budget():
     cmd = mgr._build_command("test", max_budget=2.5)
     idx = cmd.index("--max-budget-usd")
     assert cmd[idx + 1] == "2.5"
+
+
+# --- Tests for stream buffer limit and oversized line recovery ---
+
+
+def test_stream_buffer_limit_is_at_least_1mb():
+    """_STREAM_BUFFER_LIMIT should be at least 1 MB."""
+    assert ClaudeCodeManager._STREAM_BUFFER_LIMIT >= 1 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_execute_passes_buffer_limit():
+    """create_subprocess_exec should receive limit= kwarg."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    mgr = ClaudeCodeManager(ClaudeConfig())
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = asyncio.StreamReader()
+    mock_proc.stdout.feed_eof()
+    mock_proc.stderr = MagicMock()
+    mock_proc.stderr.read = AsyncMock(return_value=b"")
+    mock_proc.wait = AsyncMock(return_value=0)
+    mock_proc.returncode = 0
+
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec:
+        await mgr.execute("test", "/tmp")
+
+    _, kwargs = mock_exec.call_args
+    assert kwargs.get("limit") == ClaudeCodeManager._STREAM_BUFFER_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_parse_stream_recovers_from_oversized_line():
+    """A LimitOverrunError during readline should be caught, not crash the stream."""
+    import asyncio as aio
+    from unittest.mock import AsyncMock
+
+    mgr = ClaudeCodeManager(ClaudeConfig())
+
+    reader = AsyncMock(spec=aio.StreamReader)
+    # First call: raise LimitOverrunError (oversized line)
+    # Second call: return a valid JSON line
+    # Third call: return empty bytes (EOF)
+    import json
+    valid_event = json.dumps({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "hello"}]},
+    }).encode() + b"\n"
+
+    reader.readline = AsyncMock(side_effect=[
+        aio.LimitOverrunError("line too long", 100000),
+        valid_event,
+        b"",
+    ])
+    reader.read = AsyncMock(return_value=b"x" * 100000)
+
+    actions = [a async for a in mgr._parse_stream(reader)]
+    # Should not crash; the valid event after recovery has no tool_use, so 0 actions
+    assert actions == []
+    # Verify the oversized data was drained
+    reader.read.assert_called_once_with(100000)

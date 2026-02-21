@@ -1,7 +1,8 @@
 """Window management for switching focus between applications.
 
 Uses compositor-specific methods to raise and focus windows by WM_CLASS.
-GNOME/Mutter: gdbus call to org.gnome.Shell.Eval with meta_window.activate().
+GNOME/Mutter: gdbus call to bundled work4me-focus extension which exposes
+  com.work4me.WindowFocus.ActivateByWmClass via D-Bus.
 Sway: stub for future swaymsg implementation.
 Null: no-op fallback when no compositor is detected.
 """
@@ -20,47 +21,62 @@ logger = logging.getLogger(__name__)
 class WindowManager(Protocol):
     """Protocol for compositor-specific window management."""
 
-    async def focus_window(self, window_class: str) -> bool: ...
+    async def focus_window(self, window_class: str, *, title_hint: str = "") -> bool: ...
     async def health_check(self) -> bool: ...
 
 
 class GnomeWindowManager:
-    """Focus windows on GNOME/Mutter via org.gnome.Shell.Eval D-Bus method."""
+    """Focus windows on GNOME/Mutter via bundled work4me-focus extension.
+
+    Calls com.work4me.WindowFocus.ActivateByWmClass over D-Bus.
+    The extension runs inside GNOME Shell, bypassing focus-stealing
+    restrictions and handling cross-workspace activation.
+    """
+
+    _DBUS_DEST = "org.gnome.Shell"
+    _DBUS_PATH = "/com/work4me/WindowFocus"
+    _DBUS_METHOD = "com.work4me.WindowFocus.ActivateByWmClass"
+    _DBUS_METHOD_TITLE = "com.work4me.WindowFocus.ActivateByWmClassAndTitle"
 
     def __init__(self) -> None:
         self._gdbus_path = shutil.which("gdbus")
         self._available: bool | None = None  # None = not yet checked
 
-    async def focus_window(self, window_class: str) -> bool:
-        """Activate the first window matching wm_class (case-insensitive)."""
+    async def focus_window(self, window_class: str, *, title_hint: str = "") -> bool:
+        """Activate a window matching wm_class, optionally by title substring."""
         if self._available is False:
             return False
         if not self._gdbus_path:
             self._mark_unavailable("gdbus not found")
             return False
 
-        sanitized = window_class.replace("'", "")
+        if title_hint:
+            result = await self._call_dbus(
+                self._DBUS_METHOD_TITLE, window_class, title_hint,
+            )
+            if result is not None:
+                return result
+            # New method not available (old extension) — fall back
+            logger.debug("ActivateByWmClassAndTitle unavailable, falling back")
 
-        js = (
-            "global.get_window_actors().find(a => "
-            f"a.meta_window.get_wm_class()?.toLowerCase() === '{sanitized.lower()}'"
-            ")?.meta_window.activate(global.get_current_time())"
-        )
+        return await self._call_dbus(self._DBUS_METHOD, window_class) or False
 
+    async def _call_dbus(self, method: str, *args: str) -> bool | None:
+        """Call a D-Bus method. Returns True/False on success, None if method missing."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                self._gdbus_path,
+                self._gdbus_path,  # type: ignore[arg-type]
                 "call", "--session",
-                "--dest", "org.gnome.Shell",
-                "--object-path", "/org/gnome/Shell",
-                "--method", "org.gnome.Shell.Eval",
-                js,
+                "--dest", self._DBUS_DEST,
+                "--object-path", self._DBUS_PATH,
+                "--method", method,
+                *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5.0)
         except asyncio.TimeoutError:
-            logger.warning("gdbus Shell.Eval timed out")
+            logger.warning("gdbus %s timed out", method.rpartition(".")[-1])
             return False
         except OSError as exc:
             self._mark_unavailable(f"gdbus exec failed: {exc}")
@@ -69,30 +85,47 @@ class GnomeWindowManager:
         if proc.returncode != 0:
             err = stderr.decode(errors="replace").strip()
             if "not found" in err or "does not exist" in err:
-                self._mark_unavailable(f"Shell.Eval unavailable: {err}")
+                if method == self._DBUS_METHOD_TITLE:
+                    return None  # Method missing — caller should fall back
+                self._mark_unavailable(f"Extension unavailable: {err}")
             else:
-                logger.debug("gdbus Shell.Eval failed: %s", err)
+                logger.debug("gdbus %s failed: %s", method.rpartition(".")[-1], err)
             return False
 
         output = stdout.decode(errors="replace")
-        if "(true," in output:
+        if "(true,)" in output:
             self._available = True
             return True
 
         return False
 
     async def health_check(self) -> bool:
-        """Return True if gdbus and Shell.Eval are likely available."""
+        """Return True if the work4me-focus extension is reachable."""
         if self._available is not None:
             return self._available
         if not self._gdbus_path:
             self._available = False
             return False
-        # Probe with a harmless eval
-        result = await self.focus_window("__health_check_nonexistent__")
-        # Even if no window matched, _available is set based on D-Bus reachability
-        if self._available is None:
+
+        # Introspect the extension path — no side effects
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self._gdbus_path,
+                "introspect", "--session",
+                "--dest", self._DBUS_DEST,
+                "--object-path", self._DBUS_PATH,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5.0)
+        except (asyncio.TimeoutError, OSError):
+            self._available = False
+            return False
+
+        if proc.returncode == 0 and b"ActivateByWmClass" in stdout:
             self._available = True
+        else:
+            self._available = False
         return self._available
 
     def _mark_unavailable(self, reason: str) -> None:
@@ -104,7 +137,7 @@ class GnomeWindowManager:
 class SwayWindowManager:
     """Stub for Sway compositor — future swaymsg implementation."""
 
-    async def focus_window(self, window_class: str) -> bool:
+    async def focus_window(self, window_class: str, *, title_hint: str = "") -> bool:
         return False
 
     async def health_check(self) -> bool:
@@ -114,7 +147,7 @@ class SwayWindowManager:
 class NullWindowManager:
     """No-op fallback when no supported compositor is detected."""
 
-    async def focus_window(self, window_class: str) -> bool:
+    async def focus_window(self, window_class: str, *, title_hint: str = "") -> bool:
         return False
 
     async def health_check(self) -> bool:

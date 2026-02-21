@@ -88,7 +88,7 @@ async def test_launch_creates_context_when_empty(controller):
     mock_pw_instance.chromium.connect_over_cdp = AsyncMock(return_value=mock_browser)
 
     async def fake_launch():
-        # Simulate what launch() does after connecting
+        # Simulate what _finalize_connection() does after connecting
         controller._browser = mock_browser
         if controller._browser.contexts:
             controller._context = controller._browser.contexts[0]
@@ -171,6 +171,7 @@ async def test_launch_adds_user_data_dir():
 
     mock_proc = AsyncMock()
     mock_proc.pid = 1234
+    mock_proc.returncode = None  # Process still running
 
     mock_pw_instance = AsyncMock()
     mock_browser = AsyncMock()
@@ -183,7 +184,8 @@ async def test_launch_adds_user_data_dir():
     mock_pw_cm = AsyncMock()
     mock_pw_cm.__aenter__ = AsyncMock(return_value=mock_pw_instance)
 
-    with patch("work4me.controllers.browser.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec, \
+    with patch.object(ctrl, '_try_connect_existing', new_callable=AsyncMock, return_value=False), \
+         patch("work4me.controllers.browser.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec, \
          patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock), \
          patch.dict("sys.modules", {"playwright": MagicMock(), "playwright.async_api": MagicMock(async_playwright=lambda: mock_pw_cm)}):
         await ctrl.launch()
@@ -200,6 +202,7 @@ async def test_launch_adds_profile_directory():
 
     mock_proc = AsyncMock()
     mock_proc.pid = 1234
+    mock_proc.returncode = None  # Process still running
 
     mock_pw_instance = AsyncMock()
     mock_browser = AsyncMock()
@@ -212,10 +215,250 @@ async def test_launch_adds_profile_directory():
     mock_pw_cm = AsyncMock()
     mock_pw_cm.__aenter__ = AsyncMock(return_value=mock_pw_instance)
 
-    with patch("work4me.controllers.browser.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec, \
+    with patch.object(ctrl, '_try_connect_existing', new_callable=AsyncMock, return_value=False), \
+         patch("work4me.controllers.browser.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec, \
          patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock), \
          patch.dict("sys.modules", {"playwright": MagicMock(), "playwright.async_api": MagicMock(async_playwright=lambda: mock_pw_cm)}):
         await ctrl.launch()
 
     cmd_args = mock_exec.call_args[0]
     assert any("--profile-directory=Profile 1" in str(a) for a in cmd_args)
+
+
+@pytest.mark.asyncio
+async def test_launch_retries_cdp_connection():
+    """launch() should retry CDP connection on failure and succeed on 3rd attempt."""
+    config = BrowserConfig(cdp_max_retries=5, cdp_retry_base_delay=0.01, cdp_initial_wait=0.0)
+    ctrl = BrowserController(config)
+
+    mock_proc = AsyncMock()
+    mock_proc.pid = 1234
+    mock_proc.returncode = None  # Process still running
+
+    mock_pw_instance = AsyncMock()
+    mock_browser = AsyncMock()
+    mock_browser.contexts = []
+    mock_ctx = AsyncMock()
+    mock_ctx.pages = []
+    mock_ctx.new_page = AsyncMock(return_value=AsyncMock())
+    mock_browser.new_context = AsyncMock(return_value=mock_ctx)
+
+    cdp_call_count = 0
+    async def flaky_cdp(endpoint):
+        nonlocal cdp_call_count
+        cdp_call_count += 1
+        if cdp_call_count < 3:
+            raise ConnectionError("CDP refused")
+        return mock_browser
+
+    mock_pw_instance.chromium.connect_over_cdp = AsyncMock(side_effect=flaky_cdp)
+    mock_pw_cm = AsyncMock()
+    mock_pw_cm.__aenter__ = AsyncMock(return_value=mock_pw_instance)
+
+    with patch.object(ctrl, '_try_connect_existing', new_callable=AsyncMock, return_value=False), \
+         patch("work4me.controllers.browser.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc), \
+         patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock), \
+         patch.dict("sys.modules", {"playwright": MagicMock(), "playwright.async_api": MagicMock(async_playwright=lambda: mock_pw_cm)}):
+        await ctrl.launch()
+
+    assert cdp_call_count == 3
+    assert ctrl._browser_available is True
+
+
+@pytest.mark.asyncio
+async def test_launch_raises_after_cdp_retries_exhausted():
+    """launch() should raise RuntimeError after all CDP retries fail."""
+    config = BrowserConfig(cdp_max_retries=3, cdp_retry_base_delay=0.01, cdp_initial_wait=0.0)
+    ctrl = BrowserController(config)
+
+    mock_proc = AsyncMock()
+    mock_proc.pid = 1234
+    mock_proc.returncode = None  # Process still running
+
+    mock_pw_instance = AsyncMock()
+    mock_pw_instance.chromium.connect_over_cdp = AsyncMock(side_effect=ConnectionError("refused"))
+    mock_pw_instance.stop = AsyncMock()
+    mock_pw_cm = AsyncMock()
+    mock_pw_cm.__aenter__ = AsyncMock(return_value=mock_pw_instance)
+
+    with patch.object(ctrl, '_try_connect_existing', new_callable=AsyncMock, return_value=False), \
+         patch("work4me.controllers.browser.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc), \
+         patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock), \
+         patch.dict("sys.modules", {"playwright": MagicMock(), "playwright.async_api": MagicMock(async_playwright=lambda: mock_pw_cm)}):
+        with pytest.raises(RuntimeError, match="CDP connection failed after 3 attempts"):
+            await ctrl.launch()
+
+
+# --- New tests for pre-flight, singleton detection, Chrome takeover ---
+
+
+@pytest.mark.asyncio
+async def test_launch_preflight_connects_to_existing_cdp():
+    """When CDP is already available on the port, launch() skips spawning."""
+    config = BrowserConfig(cdp_initial_wait=0.0)
+    ctrl = BrowserController(config)
+
+    mock_browser = AsyncMock()
+    mock_browser.contexts = []
+    mock_ctx = AsyncMock()
+    mock_ctx.pages = []
+    mock_ctx.new_page = AsyncMock(return_value=AsyncMock())
+    mock_browser.new_context = AsyncMock(return_value=mock_ctx)
+
+    mock_pw_instance = AsyncMock()
+    mock_pw_instance.chromium.connect_over_cdp = AsyncMock(return_value=mock_browser)
+    mock_pw_cm = AsyncMock()
+    mock_pw_cm.__aenter__ = AsyncMock(return_value=mock_pw_instance)
+
+    with patch("work4me.controllers.browser.asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec, \
+         patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock), \
+         patch.dict("sys.modules", {"playwright": MagicMock(), "playwright.async_api": MagicMock(async_playwright=lambda: mock_pw_cm)}):
+        await ctrl.launch()
+
+    # Should NOT have spawned a Chrome process
+    mock_exec.assert_not_called()
+    # But should be connected
+    assert ctrl._browser_available is True
+    assert ctrl._browser is mock_browser
+
+
+@pytest.mark.asyncio
+async def test_launch_preflight_failure_proceeds_to_spawn():
+    """When pre-flight CDP fails, launch() proceeds to spawn Chrome normally."""
+    config = BrowserConfig(cdp_max_retries=1, cdp_retry_base_delay=0.01, cdp_initial_wait=0.0)
+    ctrl = BrowserController(config)
+
+    mock_proc = AsyncMock()
+    mock_proc.pid = 5678
+    mock_proc.returncode = None  # Process still running
+
+    mock_browser = AsyncMock()
+    mock_browser.contexts = []
+    mock_ctx = AsyncMock()
+    mock_ctx.pages = []
+    mock_ctx.new_page = AsyncMock(return_value=AsyncMock())
+    mock_browser.new_context = AsyncMock(return_value=mock_ctx)
+
+    # Pre-flight fails, then _connect_cdp succeeds
+    call_count = 0
+    async def cdp_side_effect(endpoint, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # First call is from _try_connect_existing — fail
+            raise ConnectionError("no CDP on port")
+        # Second call is from _connect_cdp — succeed
+        return mock_browser
+
+    mock_pw_instance = AsyncMock()
+    mock_pw_instance.chromium.connect_over_cdp = AsyncMock(side_effect=cdp_side_effect)
+    mock_pw_instance.stop = AsyncMock()
+    mock_pw_cm = AsyncMock()
+    mock_pw_cm.__aenter__ = AsyncMock(return_value=mock_pw_instance)
+
+    with patch("work4me.controllers.browser.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec, \
+         patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock), \
+         patch.dict("sys.modules", {"playwright": MagicMock(), "playwright.async_api": MagicMock(async_playwright=lambda: mock_pw_cm)}):
+        await ctrl.launch()
+
+    # Should have spawned Chrome
+    mock_exec.assert_called_once()
+    assert ctrl._browser_available is True
+
+
+@pytest.mark.asyncio
+async def test_launch_detects_early_exit_and_restarts():
+    """When Chrome exits immediately (singleton), launch() terminates existing and re-spawns."""
+    config = BrowserConfig(cdp_max_retries=1, cdp_retry_base_delay=0.01, cdp_initial_wait=0.0)
+    ctrl = BrowserController(config)
+
+    # First spawn: process exits immediately (singleton behavior)
+    exited_proc = AsyncMock()
+    exited_proc.pid = 1111
+    exited_proc.returncode = 0  # Already exited
+
+    # Second spawn: process stays running
+    running_proc = AsyncMock()
+    running_proc.pid = 2222
+    running_proc.returncode = None
+
+    mock_browser = AsyncMock()
+    mock_browser.contexts = []
+    mock_ctx = AsyncMock()
+    mock_ctx.pages = []
+    mock_ctx.new_page = AsyncMock(return_value=AsyncMock())
+    mock_browser.new_context = AsyncMock(return_value=mock_ctx)
+
+    mock_pw_instance = AsyncMock()
+    mock_pw_instance.chromium.connect_over_cdp = AsyncMock(return_value=mock_browser)
+    mock_pw_cm = AsyncMock()
+    mock_pw_cm.__aenter__ = AsyncMock(return_value=mock_pw_instance)
+
+    spawn_returns = [exited_proc, running_proc]
+
+    with patch.object(ctrl, '_try_connect_existing', new_callable=AsyncMock, return_value=False), \
+         patch.object(ctrl, '_terminate_existing_chrome', new_callable=AsyncMock) as mock_terminate, \
+         patch("work4me.controllers.browser.asyncio.create_subprocess_exec", new_callable=AsyncMock, side_effect=spawn_returns) as mock_exec, \
+         patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock), \
+         patch.dict("sys.modules", {"playwright": MagicMock(), "playwright.async_api": MagicMock(async_playwright=lambda: mock_pw_cm)}):
+        await ctrl.launch()
+
+    # Should have spawned twice (initial + after terminate)
+    assert mock_exec.call_count == 2
+    # Should have terminated existing Chrome
+    mock_terminate.assert_called_once()
+    assert ctrl._browser_available is True
+
+
+@pytest.mark.asyncio
+async def test_terminate_existing_chrome_graceful(controller):
+    """_terminate_existing_chrome() sends pkill and waits for graceful shutdown."""
+    pkill_proc = AsyncMock()
+    pkill_proc.wait = AsyncMock(return_value=0)
+
+    # pgrep returns non-zero (no processes found) on first check
+    pgrep_proc = AsyncMock()
+    pgrep_proc.wait = AsyncMock(return_value=1)
+
+    call_count = 0
+    async def mock_subprocess(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if args[0] == "pkill":
+            return pkill_proc
+        return pgrep_proc
+
+    with patch("work4me.controllers.browser.asyncio.create_subprocess_exec", side_effect=mock_subprocess), \
+         patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock):
+        await controller._terminate_existing_chrome()
+
+    # pkill was called (graceful)
+    assert call_count >= 2  # pkill + at least one pgrep
+
+
+@pytest.mark.asyncio
+async def test_terminate_existing_chrome_force_kill(controller):
+    """_terminate_existing_chrome() escalates to force kill when graceful fails."""
+    # Track pkill calls to distinguish graceful vs force
+    pkill_calls = []
+
+    async def mock_subprocess(*args, **kwargs):
+        proc = AsyncMock()
+        proc.wait = AsyncMock(return_value=0)
+        if args[0] == "pkill":
+            pkill_calls.append(list(args))
+            return proc
+        if args[0] == "pgrep":
+            # Always return 0 = processes still found
+            proc.wait = AsyncMock(return_value=0)
+            return proc
+        return proc
+
+    with patch("work4me.controllers.browser.asyncio.create_subprocess_exec", side_effect=mock_subprocess), \
+         patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock):
+        await controller._terminate_existing_chrome()
+
+    # Should have at least two pkill calls: graceful + force (-9)
+    assert len(pkill_calls) >= 2
+    # Last pkill should be force kill
+    assert "-9" in pkill_calls[-1]

@@ -54,6 +54,8 @@ class ClaudeConfig:
     max_budget_usd: float = 0.0  # 0 = unlimited (Max plan)
     dangerously_skip_permissions: bool = True
     extra_args: list[str] = field(default_factory=list)
+    plan_max_retries: int = 3
+    plan_retry_base_delay: float = 2.0
 
 
 @dataclass
@@ -83,6 +85,9 @@ class BrowserConfig:
     user_data_dir: str = ""
     profile_directory: str = ""
     window_class: str = "google-chrome"
+    cdp_max_retries: int = 5
+    cdp_retry_base_delay: float = 1.0
+    cdp_initial_wait: float = 2.0
 
 
 @dataclass

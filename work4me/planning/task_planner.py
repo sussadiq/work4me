@@ -1,5 +1,8 @@
 """Task decomposition via Claude Code."""
 
+from __future__ import annotations
+
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -63,6 +66,7 @@ class TaskPlanner:
     """Decomposes a high-level task into structured activities using Claude Code."""
 
     def __init__(self, config: ClaudeConfig):
+        self._config = config
         self._claude = ClaudeCodeManager(config)
 
     async def decompose(
@@ -72,7 +76,11 @@ class TaskPlanner:
         working_dir: str,
         project_context: str = "",
     ) -> TaskPlan:
-        """Ask Claude Code to decompose a task into activities."""
+        """Ask Claude Code to decompose a task into activities.
+
+        Retries on transient failures (stream errors, malformed output)
+        up to config.plan_max_retries times with exponential backoff.
+        """
         target_minutes = int(time_budget_hours * 60 * 0.70)
         prompt = DECOMPOSITION_PROMPT.format(
             task_description=task_description,
@@ -83,16 +91,35 @@ class TaskPlanner:
         if project_context:
             prompt += f"\n\nProject context:\n{project_context}"
 
-        result = await self._claude.execute(
-            prompt=prompt,
-            working_dir=working_dir,
-            max_turns=3,
+        max_retries = self._config.plan_max_retries
+        base_delay = self._config.plan_retry_base_delay
+        last_exc: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                result = await self._claude.execute(
+                    prompt=prompt,
+                    working_dir=working_dir,
+                    max_turns=3,
+                )
+
+                if result.error:
+                    raise RuntimeError(f"Task decomposition failed: {result.error}")
+
+                return self._parse_plan(task_description, result.raw_text)
+            except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
+                last_exc = exc
+                if attempt < max_retries - 1:
+                    wait = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "Task decomposition attempt %d/%d failed, retrying in %.1fs: %s",
+                        attempt + 1, max_retries, wait, exc,
+                    )
+                    await asyncio.sleep(wait)
+
+        raise RuntimeError(
+            f"Task decomposition failed after {max_retries} attempts: {last_exc}"
         )
-
-        if result.error:
-            raise RuntimeError(f"Task decomposition failed: {result.error}")
-
-        return self._parse_plan(task_description, result.raw_text)
 
     def _parse_plan(self, task_description: str, raw_text: str) -> TaskPlan:
         """Parse Claude's JSON response into a TaskPlan."""

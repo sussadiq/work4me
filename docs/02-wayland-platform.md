@@ -86,9 +86,13 @@ Partially works for XWayland windows only. Window management completely broken. 
 
 ### GNOME/Mutter
 - No native CLI for window move/resize/focus
-- Options:
-  - GNOME Shell extensions via D-Bus: `activate-window-by-title`, `Window Commander`
-  - `org.gnome.Shell.Eval` D-Bus interface — **implemented** in `work4me/desktop/window_mgr.py` via `gdbus call`. Uses JS to find windows by `wm_class` and call `activate()`. Caches availability to avoid log spam; gracefully degrades if Shell.Eval is restricted.
+- `org.gnome.Shell.Eval` D-Bus interface — **blocked since GNOME 45** (returns `(false, '')` for all calls). `Shell.FocusApp` also returns `AccessDenied`. Neither method works on GNOME 45-49.
+- **Current approach:** Bundled GNOME Shell extension (`work4me/desktop/gnome-ext/`) that exposes two D-Bus methods:
+  - `com.work4me.WindowFocus.ActivateByWmClass(wm_class)` — focuses first window matching WM_CLASS (exact match).
+  - `com.work4me.WindowFocus.ActivateByWmClassAndTitle(wm_class, title_substring)` — case-insensitive WM_CLASS match + title substring match. Falls back to first WM_CLASS match if no title match found. Solves multi-window disambiguation (e.g. multiple VS Code windows).
+
+  The extension runs inside the GNOME Shell process, bypassing focus-stealing restrictions. Uses `workspace.activate_with_focus(window, now)` which handles cross-workspace activation. Auto-installed by `work4me doctor` and during orchestrator init.
+- Other options (not used):
   - AT-SPI accessibility APIs for reading UI state
   - GNOME 49 `xdg_toplevel_tag_v1` protocol + `gnome-service-client` for tagging windows
 
@@ -193,6 +197,18 @@ def detect_compositor() -> str:
     if session == 'wayland': return 'unknown-wayland'
     return 'x11'
 ```
+
+## Browser / CDP Connection
+
+Chrome/Chromium uses a **singleton pattern**: when launched with a user data directory that's already locked by a running instance, the new process delegates to the existing one via IPC and **exits immediately**. This means `--remote-debugging-port=9222` has no effect — the running instance doesn't have CDP enabled.
+
+**Work4Me handles this with a three-step launch strategy:**
+
+1. **Pre-flight check**: Try connecting to an existing CDP endpoint on the configured port. If Chrome is already running with CDP (e.g., started manually with `--remote-debugging-port`), skip spawning entirely.
+2. **Early exit detection**: After spawning Chrome, check if the process exited immediately (`returncode is not None`). This indicates singleton delegation to an existing non-CDP instance.
+3. **Chrome takeover**: When singleton is detected, terminate the existing Chrome (`pkill` with 5s graceful timeout, escalating to `pkill -9`), then re-spawn with CDP enabled.
+
+This preserves the user's real Chrome profile (bookmarks, history, extensions, login sessions) while ensuring CDP is available for browser automation.
 
 ## Target Priority
 

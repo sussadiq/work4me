@@ -80,3 +80,16 @@ def test_load_config_partial_toml(tmp_path):
     config = load_config(toml_file)
     assert config.mode == "ai-assisted"
     assert config.typing.wpm_code == 62.0  # unchanged default
+
+
+def test_claude_config_retry_defaults():
+    config = ClaudeConfig()
+    assert config.plan_max_retries == 3
+    assert config.plan_retry_base_delay == 2.0
+
+
+def test_browser_config_cdp_retry_defaults():
+    config = BrowserConfig()
+    assert config.cdp_max_retries == 5
+    assert config.cdp_retry_base_delay == 1.0
+    assert config.cdp_initial_wait == 2.0

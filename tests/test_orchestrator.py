@@ -379,8 +379,11 @@ async def test_coding_manual_focuses_vscode_window(orchestrator):
     orchestrator._window_mgr = AsyncMock()
     orchestrator._activity_monitor = MagicMock()
 
+    orchestrator.snapshot.working_dir = "/tmp"
     await orchestrator._execute_coding_manual(activity, "/tmp")
-    orchestrator._window_mgr.focus_window.assert_called_once_with("code")
+    orchestrator._window_mgr.focus_window.assert_called_once_with(
+        "code", title_hint="tmp",
+    )
 
 
 @pytest.mark.asyncio
@@ -396,8 +399,11 @@ async def test_coding_ai_assisted_focuses_vscode_window(orchestrator):
     orchestrator._window_mgr = AsyncMock()
     orchestrator._activity_monitor = MagicMock()
 
+    orchestrator.snapshot.working_dir = "/tmp"
     await orchestrator._execute_coding_ai_assisted(activity, "/tmp")
-    orchestrator._window_mgr.focus_window.assert_called_once_with("code")
+    orchestrator._window_mgr.focus_window.assert_called_once_with(
+        "code", title_hint="tmp",
+    )
 
 
 @pytest.mark.asyncio
@@ -414,7 +420,9 @@ async def test_browser_activity_focuses_chrome_window(orchestrator):
     orchestrator._activity_monitor = MagicMock()
 
     await orchestrator._execute_browser(activity)
-    orchestrator._window_mgr.focus_window.assert_called_once_with("google-chrome")
+    orchestrator._window_mgr.focus_window.assert_called_once_with(
+        "google-chrome", title_hint="",
+    )
 
 
 @pytest.mark.asyncio
@@ -429,8 +437,11 @@ async def test_terminal_activity_focuses_vscode_window(orchestrator):
     orchestrator._window_mgr = AsyncMock()
     orchestrator._activity_monitor = MagicMock()
 
+    orchestrator.snapshot.working_dir = "/tmp"
     await orchestrator._execute_terminal(activity, "/tmp")
-    orchestrator._window_mgr.focus_window.assert_called_once_with("code")
+    orchestrator._window_mgr.focus_window.assert_called_once_with(
+        "code", title_hint="tmp",
+    )
 
 
 @pytest.mark.asyncio
@@ -445,8 +456,11 @@ async def test_reading_activity_focuses_vscode_window(orchestrator):
     orchestrator._window_mgr = AsyncMock()
     orchestrator._activity_monitor = MagicMock()
 
+    orchestrator.snapshot.working_dir = "/tmp"
     await orchestrator._execute_reading(activity)
-    orchestrator._window_mgr.focus_window.assert_called_once_with("code")
+    orchestrator._window_mgr.focus_window.assert_called_once_with(
+        "code", title_hint="tmp",
+    )
 
 
 @pytest.mark.asyncio
@@ -472,3 +486,38 @@ async def test_focus_failure_does_not_block_activity(orchestrator):
     orchestrator._claude.execute.assert_called_once()
     # pause_natural should NOT be called for window focus (focus returned False)
     # but may be called for other reasons — just verify activity completed
+
+
+# ------------------------------------------------------------------
+# Fallback plan on planning failure
+# ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_plan_uses_fallback_on_planner_failure():
+    """_plan() should return a fallback schedule when planner.decompose raises."""
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+    orch._planner = AsyncMock()
+    orch._planner.decompose = AsyncMock(side_effect=RuntimeError("planning failed"))
+
+    schedule = await orch._plan("Build auth system", 60, "/tmp")
+    # Fallback should still produce a usable schedule
+    assert isinstance(schedule, Schedule)
+    assert len(schedule.sessions) >= 1
+
+
+@pytest.mark.asyncio
+async def test_fallback_plan_creates_single_activity():
+    """_fallback_plan() should create a schedule with 1 CODING activity at 70% budget."""
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+
+    schedule = orch._fallback_plan("Build auth system", 100)
+
+    # Collect all activities across sessions
+    all_activities = [a for s in schedule.sessions for a in s.activities]
+    assert len(all_activities) == 1
+    assert all_activities[0].kind == ActivityKind.CODING
+    assert all_activities[0].estimated_minutes == 70
+    assert all_activities[0].description == "Build auth system"

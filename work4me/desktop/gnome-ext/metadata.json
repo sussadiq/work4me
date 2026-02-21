@@ -1,0 +1,7 @@
+{
+  "uuid": "work4me-focus@work4me",
+  "name": "Work4Me Window Focus",
+  "description": "D-Bus interface for Work4Me to focus windows by WM_CLASS",
+  "shell-version": ["45", "46", "47", "48", "49"],
+  "version": 2
+}

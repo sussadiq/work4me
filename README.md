@@ -1,53 +1,73 @@
 # Work4Me
 
-A Linux desktop AI agent that performs real software engineering work with human-like pacing. It runs Claude Code CLI headless, then replays every action — file edits, terminal commands, browser searches — visibly across your desktop at natural typing speed.
+**A Linux desktop AI agent that does your coding work — visibly, at human speed.**
 
-## Why
+Work4Me takes a task and a time budget, decomposes it into activities, and executes each one through real desktop applications (VS Code, Chromium, terminal). It opens files, types code, runs commands, searches the web, takes breaks — all paced like a person actually sitting at the keyboard.
 
-AI writes code in seconds. Time-tracking tools expect hours of visible activity. Work4Me bridges that gap: it decomposes a task into subtasks, schedules them across a time budget with natural breaks, and executes each one through real applications (VS Code, Chromium, terminal) with human-paced keystrokes, mouse movements, and idle pauses.
+Under the hood, Claude Code CLI does the real engineering. Work4Me is the performance layer that makes it look like someone's home.
+
+---
+
+## The Problem
+
+AI can write code in seconds. But your time tracker, your screen recorder, your Upwork client — they all expect hours of visible work. Copy-pasting AI output doesn't look like engineering. It looks like what it is.
+
+Work4Me fixes that. It takes the same AI output and replays it the way a developer would: opening files one by one, typing with realistic speed and typos, pausing to read, switching to the browser to look something up, running tests, taking coffee breaks. The work is real. The pacing is human.
 
 ## How It Works
 
 ```
-Task + Time Budget
-        │
-        ▼
-┌─────────────────┐
-│  Task Planner    │  Claude decomposes task into activities
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│   Scheduler      │  Maps activities onto work sessions with breaks
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  Orchestrator    │  Runs each activity through Claude Code CLI
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│ Behavior Engine  │  Replays actions at human speed with variation
-└────────┬────────┘
-         ▼
-  VS Code · Browser · Terminal
+  "Implement JWT auth"          you
+  + 4 hours budget               │
+         │                        │
+         ▼                        │   you go do literally
+  ┌──────────────┐                │   whatever you want
+  │ Task Planner │ Claude breaks  │
+  │              │ it into pieces │
+  └──────┬───────┘                │
+         ▼                        │
+  ┌──────────────┐                │
+  │  Scheduler   │ Maps onto      │
+  │              │ work sessions  │
+  └──────┬───────┘                │
+         ▼                        │
+  ┌──────────────┐                │
+  │ Orchestrator │ Runs Claude    │
+  │              │ Code per task  │
+  └──────┬───────┘                │
+         ▼                        │
+  ┌──────────────┐                │
+  │  Behavior    │ Replays at     │
+  │  Engine      │ human speed    │
+  └──────┬───────┘                │
+         ▼                        ▼
+  VS Code · Chrome · Terminal   done.
 ```
 
-1. **Plan** — Claude Code decomposes your task into coding, research, and review activities
-2. **Schedule** — Activities are distributed across work sessions with natural breaks
-3. **Execute** — Each activity runs through Claude Code CLI (headless, full speed)
-4. **Replay** — Actions are replayed visibly: files open in VS Code, commands type in terminal, searches happen in the browser — all at human pace
-5. **Monitor** — A behavior engine adjusts pacing, adds idle pauses, and injects variation to keep activity patterns natural
+**Step by step:**
+
+1. **Plan** — Claude decomposes your task into coding, research, terminal, and review activities
+2. **Schedule** — Activities get distributed across work sessions with natural breaks (configurable)
+3. **Execute** — Each activity runs through Claude Code CLI headless at full speed
+4. **Replay** — The results are performed visibly: files open in VS Code, commands get typed into the terminal, searches happen in the browser, all at ~85 WPM with realistic variation
+5. **Monitor** — A behavior engine watches activity patterns and adjusts pacing — adds idle pauses, mouse movements, typing speed variation, so it never looks robotic
+
+---
 
 ## Requirements
 
-- Linux (GNOME Wayland — primary target; Sway planned)
-- Python 3.11+
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
-- VS Code with the Work4Me WebSocket extension
-- Chromium (for browser automation via Playwright)
+| What | Why |
+|------|-----|
+| Linux with GNOME Wayland | Primary target (Sway support planned) |
+| Python 3.11+ | Runtime |
+| [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) | The brain — must be installed and authenticated |
+| VS Code | Where code gets visibly written |
+| Chromium / Chrome | Browser automation via Playwright CDP |
+| `gdbus` | D-Bus calls for GNOME window switching |
 
 ## Installation
 
-### 1. Python package
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/your-org/work4me.git
@@ -55,39 +75,59 @@ cd work4me
 pip install -e ".[dev]"
 ```
 
-### 2. VS Code extension
+### 2. Set up the VS Code extension
 
-The `work4me-bridge` extension runs a WebSocket server inside VS Code so Work4Me can open files, type text, and run terminal commands remotely.
+The `work4me-bridge` extension runs a WebSocket server inside VS Code so Work4Me can remotely open files, type text, and execute terminal commands.
 
 ```bash
 cd vscode-extension
-npm install
-npm run compile
+npm install && npm run compile
 ```
 
-Then install it into VS Code:
+Install it:
 
 ```bash
-# Option A: symlink into VS Code extensions (development)
+# Dev mode — symlink into VS Code extensions
 ln -s "$(pwd)" ~/.vscode/extensions/work4me-bridge
 
-# Option B: load via CLI flag (Work4Me does this automatically)
+# Or load via CLI flag (Work4Me does this automatically on launch)
 code --extensions-dir /path/to/vscode-extension
 ```
 
-The extension activates on startup and listens on `ws://localhost:9876` by default. To change the port, add to your VS Code `settings.json`:
+The extension listens on `ws://localhost:9876` by default. Change the port in VS Code settings:
 
 ```json
-{
-  "work4me.port": 9876
-}
+{ "work4me.port": 9876 }
 ```
 
-### 3. Verify
+### 3. GNOME window focus extension
+
+Work4Me bundles a minimal GNOME Shell extension for switching focus between VS Code and Chrome. It gets auto-installed on first run, but you can do it manually:
+
+```bash
+# Create a zip and install via the official CLI tool
+cd work4me/desktop/gnome-ext
+zip /tmp/work4me-focus.zip metadata.json extension.js
+gnome-extensions install --force /tmp/work4me-focus.zip
+```
+
+**On Wayland, you need to log out and back in** for GNOME Shell to discover the new extension. Then enable it:
+
+```bash
+gnome-extensions enable work4me-focus@work4me
+```
+
+> **Why an extension?** `org.gnome.Shell.Eval` has been completely blocked since GNOME 45, and `Shell.FocusApp` returns `AccessDenied`. Our extension runs inside GNOME Shell and exposes a single D-Bus method (`ActivateByWmClass`) that bypasses focus-stealing restrictions and handles cross-workspace window activation. Same pattern as [activate-window-by-title](https://github.com/lucaswerkmeister/activate-window-by-title), stripped to just what we need.
+
+### 4. Verify everything
 
 ```bash
 work4me doctor
 ```
+
+This checks for all binaries, permissions, Wayland session, VS Code extension, and (on GNOME) the window focus extension.
+
+---
 
 ## Usage
 
@@ -95,100 +135,153 @@ work4me doctor
 # Start a 4-hour coding session
 work4me start --task "Implement user authentication with JWT" --budget 240
 
-# Use a specific operating mode
+# Use ai-assisted mode (Claude runs visibly in the terminal)
 work4me start --task "Fix pagination bug" --budget 120 --mode ai-assisted
 
-# With a config file
-work4me start --task "Add API rate limiting" --budget 180 --config ~/.config/work4me/config.toml
+# Point to a specific config
+work4me start --task "Add API rate limiting" --budget 180 \
+  --config ~/.config/work4me/config.toml
 
-# Check status
+# Check what's happening
 work4me status
 
-# Stop gracefully
+# Stop gracefully (finishes current activity, commits, cleans up)
 work4me stop
 ```
 
 ### Operating Modes
 
-| Mode | How it works |
+| Mode | What happens |
 |------|-------------|
-| `manual` (default) | Claude runs headless, Work4Me replays actions in VS Code |
-| `ai-assisted` | Claude runs visibly in a VS Code terminal |
+| **`manual`** (default) | Claude runs headless at full speed. Work4Me replays every file edit, terminal command, and search visibly in VS Code / browser at human pace. |
+| **`ai-assisted`** | Claude runs in a visible VS Code terminal. Work4Me types prompts and reviews output like a developer using an AI assistant. |
+
+---
 
 ## Configuration
 
-Work4Me loads config from `~/.config/work4me/config.toml`. All fields are optional — sensible defaults are built in.
+Config lives at `~/.config/work4me/config.toml`. Everything has defaults — you only need to set what you want to change.
 
 ```toml
+mode = "manual"  # or "ai-assisted"
+
 [session]
-duration_mean = 50       # Average session length (minutes)
-break_mean = 8           # Average break length (minutes)
+duration_mean = 50       # avg work session (minutes)
+break_mean = 8           # avg break (minutes)
 sessions_per_4_hours = 4
 
 [typing]
-wpm = 85
-error_rate = 0.02
+wpm = 85                 # words per minute
+error_rate = 0.02        # typo frequency (corrected naturally)
 
 [claude]
 model = "sonnet"
 max_turns = 25
 
-[desktop]
-compositor = "gnome"
-editor = "vscode"
-browser = "chromium"
+[browser]
+enabled = true
+window_class = "Chromium-browser"
+
+[vscode]
+launch_on_start = true
+window_class = "Code"
 ```
+
+---
 
 ## Project Structure
 
 ```
 work4me/
-├── cli.py                  # CLI entry point (start, stop, status, doctor)
-├── config.py               # TOML config loading with dataclass defaults
-├── doctor.py               # System dependency checker
+├── cli.py                     Entry point — start, stop, status, doctor
+├── config.py                  TOML config → nested dataclasses
+├── doctor.py                  System health checks + GNOME extension installer
+│
 ├── core/
-│   ├── orchestrator.py     # Main brain — plans, executes, monitors
-│   ├── state.py            # State machine + crash recovery snapshots
-│   └── events.py           # Event bus for internal communication
+│   ├── orchestrator.py        The brain — plans, dispatches, monitors, recovers
+│   ├── state.py               State machine + crash recovery snapshots
+│   └── events.py              Internal event bus
+│
 ├── controllers/
-│   ├── claude_code.py      # Claude Code CLI subprocess + JSON stream parser
-│   ├── vscode.py           # VS Code control via WebSocket
-│   ├── browser.py          # Chromium automation via Playwright CDP
-│   ├── editor.py           # [STAGED] Neovim RPC (planned for Sway)
-│   └── terminal.py         # [STAGED] tmux control (planned for Sway)
+│   ├── claude_code.py         Claude Code CLI subprocess + JSON stream parser
+│   ├── vscode.py              VS Code remote control via WebSocket
+│   ├── browser.py             Chromium automation via Playwright CDP
+│   ├── editor.py              [planned] Neovim RPC for Sway
+│   └── terminal.py            [planned] tmux control for Sway
+│
 ├── behavior/
-│   ├── engine.py           # Human-like pacing with speed multiplier
-│   ├── typing.py           # Keystroke timing with Gaussian jitter
-│   ├── mouse.py            # Bezier cursor paths with Fitts' law timing
-│   └── activity_monitor.py # Tracks activity ratios and recommends adjustments
+│   ├── engine.py              Human-like pacing orchestration
+│   ├── typing.py              Keystroke timing with Gaussian jitter
+│   ├── mouse.py               Bezier cursor paths with Fitts' law timing
+│   └── activity_monitor.py    Activity ratio tracking + adjustment signals
+│
 ├── planning/
-│   ├── task_planner.py     # Claude-powered task decomposition
-│   └── scheduler.py        # Session/break scheduling from config
-└── desktop/
-    └── input_sim.py        # [STAGED] ydotool/dotool input simulation
+│   ├── task_planner.py        Claude-powered task decomposition
+│   └── scheduler.py           Work session / break scheduling
+│
+├── desktop/
+│   ├── window_mgr.py          Compositor-specific window focus switching
+│   ├── gnome-ext/             Bundled GNOME Shell extension for window focus
+│   └── input_sim.py           [planned] ydotool/dotool input simulation
+│
+└── vscode-extension/          Companion VS Code WebSocket bridge
 ```
+
+---
 
 ## Testing
 
 ```bash
-# Run all tests
-python -m pytest -v
+# Full suite
+python -m pytest tests/ -q
 
-# Run a specific test file
+# Specific module
 python -m pytest tests/test_orchestrator.py -v
+
+# Type checking
+python -m mypy work4me/ --strict
 ```
 
-132 tests covering orchestration, controllers, behavior engine, scheduling, config, CLI, and crash recovery.
+185 tests covering orchestration, controllers, behavior engine, scheduling, config, CLI, window management, doctor checks, and crash recovery. All async tests use `pytest-asyncio` with auto mode.
+
+---
 
 ## Security
 
-The hardened codebase includes:
+This tool executes AI-generated code on your machine, so the codebase is hardened:
 
-- Shell injection prevention via `shlex.quote()` for all subprocess commands
-- Path traversal guards on file operations from AI output
-- URL encoding for browser search queries
-- Response-ID matching on WebSocket to prevent message interleaving
-- Crash recovery with activity-level resume (no re-execution of completed work)
+- **Shell injection prevention** — all subprocess args go through `shlex.quote()`
+- **Path traversal guards** — file paths from AI output are resolved and checked against the working directory
+- **URL encoding** — browser search queries are properly encoded
+- **WebSocket message isolation** — response-ID matching prevents interleaved command results
+- **Crash recovery** — activity-level state snapshots mean a crash doesn't re-execute completed work
+- **Graceful degradation** — every controller (browser, VS Code, window manager) handles unavailability without crashing the session
+
+---
+
+## Design Docs
+
+The `docs/` folder contains 13 research and design documents covering the architecture decisions in detail:
+
+| Doc | Topic |
+|-----|-------|
+| `00-overview.md` | High-level architecture |
+| `01-stack-recommendation.md` | Technology choices and rationale |
+| `02-wayland-platform.md` | Wayland input, window management, screen capture |
+| `03-architecture.md` | Component design and data flow |
+| `04-claude-code-integration.md` | Claude Code CLI integration strategy |
+| `05-browser-automation.md` | Playwright CDP approach |
+| `06-terminal-editor-control.md` | tmux + Neovim control |
+| `07-behavior-model.md` | Human-like pacing algorithms |
+| `08-task-scheduling.md` | Work session and break scheduling |
+| `09-risk-analysis.md` | Threat model and mitigations |
+| `10-implementation-roadmap.md` | Build sequence and milestones |
+| `11-distribution.md` | Packaging and deployment |
+| `12-prior-art.md` | Related tools and research |
+
+These are living documents — they get updated as the architecture evolves.
+
+---
 
 ## License
 

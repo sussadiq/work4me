@@ -1,5 +1,7 @@
 """Browser automation via Chromium CDP/Playwright."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import random
@@ -23,7 +25,74 @@ class BrowserController:
         self._browser_available: bool = False
 
     async def launch(self) -> None:
-        """Launch Chromium with remote debugging and connect via Playwright."""
+        """Launch Chromium with remote debugging and connect via Playwright.
+
+        Flow:
+        1. Pre-flight: try connecting to an existing CDP endpoint on the port.
+           If successful, skip spawning a new process.
+        2. Spawn Chrome with --remote-debugging-port.
+        3. After initial wait, check if the process exited early (Chrome
+           singleton behavior — delegated to existing instance and quit).
+        4. If singleton detected: terminate existing Chrome, re-spawn.
+        5. CDP retry loop to establish Playwright connection.
+        """
+        # Step 1: Pre-flight — try connecting to existing CDP endpoint
+        if await self._try_connect_existing():
+            logger.info("Connected to existing Chrome CDP on port %d", self._config.debug_port)
+            return
+
+        # Step 2: Spawn Chrome
+        self._process = await self._spawn_chrome()
+        await asyncio.sleep(self._config.cdp_initial_wait)
+
+        # Step 3: Check for early exit (singleton behavior)
+        if self._process.returncode is not None:
+            logger.warning(
+                "Chrome exited immediately (rc=%d) — singleton detected, "
+                "existing Chrome is running without CDP",
+                self._process.returncode,
+            )
+            # Step 4: Terminate existing Chrome and re-spawn
+            await self._terminate_existing_chrome()
+            self._process = await self._spawn_chrome()
+            await asyncio.sleep(self._config.cdp_initial_wait)
+
+        # Step 5: CDP retry loop
+        await self._connect_cdp()
+
+    async def _try_connect_existing(self) -> bool:
+        """Try connecting to an existing CDP endpoint on the configured port.
+
+        Returns True if connection succeeded and browser is ready.
+        """
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            return False
+
+        try:
+            self._playwright = await async_playwright().__aenter__()
+            self._browser = await self._playwright.chromium.connect_over_cdp(
+                f"http://localhost:{self._config.debug_port}",
+                timeout=3000,
+            )
+        except Exception:
+            # Clean up playwright on failure
+            try:
+                if hasattr(self, "_playwright") and self._playwright:
+                    await self._playwright.stop()
+                    self._playwright = None  # type: ignore[assignment]
+            except Exception:
+                pass
+            self._browser = None
+            return False
+
+        # Connected — set up context and page
+        await self._finalize_connection()
+        return True
+
+    async def _spawn_chrome(self) -> asyncio.subprocess.Process:
+        """Spawn a Chrome process with remote debugging enabled."""
         cmd = [
             self._config.chromium_path,
             f"--remote-debugging-port={self._config.debug_port}",
@@ -35,18 +104,64 @@ class BrowserController:
             cmd.append(f"--user-data-dir={self._config.user_data_dir}")
         if self._config.profile_directory:
             cmd.append(f"--profile-directory={self._config.profile_directory}")
-        self._process = await asyncio.create_subprocess_exec(
+        process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
         logger.info(
-            "Chromium launched (pid=%d) on port %d",
-            self._process.pid,
+            "Chrome spawned (pid=%d) on port %d",
+            process.pid,
             self._config.debug_port,
         )
-        await asyncio.sleep(2)
+        return process
 
+    async def _terminate_existing_chrome(self) -> None:
+        """Terminate existing Chrome processes matching the configured binary."""
+        binary = self._config.chromium_path
+        logger.info("Terminating existing Chrome (%s) for CDP takeover", binary)
+
+        # Graceful: pkill by binary name
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "pkill", "-f", binary,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+        except Exception:
+            logger.warning("pkill failed", exc_info=True)
+            return
+
+        # Wait up to 5s for graceful shutdown
+        for _ in range(10):
+            await asyncio.sleep(0.5)
+            check = await asyncio.create_subprocess_exec(
+                "pgrep", "-f", binary,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            if await check.wait() != 0:
+                # No processes found — Chrome is gone
+                logger.info("Existing Chrome terminated gracefully")
+                await asyncio.sleep(1.0)  # Allow port/lock cleanup
+                return
+
+        # Force kill
+        logger.warning("Chrome didn't exit gracefully, force killing")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "pkill", "-9", "-f", binary,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+        except Exception:
+            logger.warning("Force kill failed", exc_info=True)
+        await asyncio.sleep(1.0)  # Allow port/lock cleanup
+
+    async def _connect_cdp(self) -> None:
+        """Run the CDP retry loop to connect Playwright to Chrome."""
         try:
             from playwright.async_api import async_playwright
         except ImportError:
@@ -54,10 +169,38 @@ class BrowserController:
                 "playwright required: pip install playwright && playwright install chromium"
             )
 
-        self._playwright = await async_playwright().__aenter__()
-        self._browser = await self._playwright.chromium.connect_over_cdp(
-            f"http://localhost:{self._config.debug_port}"
-        )
+        last_exc: Exception | None = None
+        for attempt in range(self._config.cdp_max_retries):
+            try:
+                self._playwright = await async_playwright().__aenter__()
+                self._browser = await self._playwright.chromium.connect_over_cdp(
+                    f"http://localhost:{self._config.debug_port}"
+                )
+                break  # success
+            except Exception as exc:
+                last_exc = exc
+                if attempt < self._config.cdp_max_retries - 1:
+                    wait = self._config.cdp_retry_base_delay * (2 ** attempt)
+                    logger.warning(
+                        "CDP connection attempt %d/%d failed, retrying in %.1fs: %s",
+                        attempt + 1, self._config.cdp_max_retries, wait, exc,
+                    )
+                    # Clean up the failed playwright instance before retrying
+                    try:
+                        if hasattr(self, "_playwright") and self._playwright:
+                            await self._playwright.stop()
+                    except Exception:
+                        pass
+                    await asyncio.sleep(wait)
+        else:
+            raise RuntimeError(
+                f"CDP connection failed after {self._config.cdp_max_retries} attempts: {last_exc}"
+            )
+
+        await self._finalize_connection()
+
+    async def _finalize_connection(self) -> None:
+        """Set up browser context and page after CDP connection."""
         if self._browser.contexts:
             self._context = self._browser.contexts[0]
         else:
