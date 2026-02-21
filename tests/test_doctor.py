@@ -30,35 +30,47 @@ def test_check_binary_missing():
     assert not result.passed
 
 
-def test_check_vscode_extension_found():
+def test_check_vscode_extension_found_via_cli():
     dc = DoctorChecks()
-    with patch("pathlib.Path.exists", return_value=True), \
-         patch("pathlib.Path.iterdir", return_value=[MagicMock(name="work4me-bridge")]):
-        # The mock's name attr is set via constructor, need to set it properly
-        mock_dir = MagicMock()
-        mock_dir.name = "work4me-bridge-0.1.0"
-        with patch("pathlib.Path.iterdir", return_value=[mock_dir]):
-            result = dc.check_vscode_extension()
+    mock_result = MagicMock(returncode=0, stdout="some.ext\nwork4me.work4me-bridge\nother.ext\n")
+    with patch("subprocess.run", return_value=mock_result):
+        result = dc.check_vscode_extension()
     assert result.passed
+    assert "work4me" in result.detail.lower()
+
+
+def test_check_vscode_extension_cli_fails_fallback_to_dir():
+    dc = DoctorChecks()
+    mock_dir = MagicMock()
+    mock_dir.name = "work4me-bridge-0.1.0"
+    mock_dir.__str__ = lambda self: "/home/user/.vscode/extensions/work4me-bridge-0.1.0"
+    with patch("subprocess.run", side_effect=FileNotFoundError), \
+         patch("pathlib.Path.exists", return_value=True), \
+         patch("pathlib.Path.iterdir", return_value=[mock_dir]):
+        result = dc.check_vscode_extension()
+    assert result.passed
+    assert "work4me-bridge" in result.detail
 
 
 def test_check_vscode_extension_missing():
     dc = DoctorChecks()
-    with patch("pathlib.Path.exists", return_value=False):
+    mock_result = MagicMock(returncode=0, stdout="some.ext\nother.ext\n")
+    with patch("subprocess.run", return_value=mock_result), \
+         patch("pathlib.Path.exists", return_value=False):
         result = dc.check_vscode_extension()
     assert not result.passed
+    assert "not installed" in result.detail
 
 
 def test_run_all_returns_list():
     dc = DoctorChecks()
+    mock_cli = MagicMock(returncode=0, stdout="work4me.work4me-bridge\n")
     with patch("shutil.which", return_value="/usr/bin/test"), \
          patch("pathlib.Path.exists", return_value=True), \
-         patch("pathlib.Path.stat") as mock_stat:
+         patch("pathlib.Path.stat") as mock_stat, \
+         patch("subprocess.run", return_value=mock_cli):
         mock_stat.return_value.st_mode = 0o660
-        mock_dir = MagicMock()
-        mock_dir.name = "work4me-bridge"
-        with patch("pathlib.Path.iterdir", return_value=[mock_dir]), \
-             patch.dict("os.environ", {"WAYLAND_DISPLAY": "wayland-0"}):
+        with patch.dict("os.environ", {"WAYLAND_DISPLAY": "wayland-0"}):
             results = dc.run_all()
     assert isinstance(results, list)
     assert all(isinstance(r, CheckResult) for r in results)
@@ -125,16 +137,33 @@ def test_install_gnome_extension_bundle_missing():
 
 def test_run_all_includes_gnome_extension_on_gnome():
     dc = DoctorChecks()
+    mock_cli = MagicMock(returncode=0, stdout="work4me.work4me-bridge\nState: ACTIVE\n")
     with patch("shutil.which", return_value="/usr/bin/test"), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("pathlib.Path.stat") as mock_stat, \
+         patch("subprocess.run", return_value=mock_cli), \
          patch.dict("os.environ", {"WAYLAND_DISPLAY": "wayland-0", "XDG_CURRENT_DESKTOP": "GNOME"}):
         mock_stat.return_value.st_mode = 0o660
-        mock_dir = MagicMock()
-        mock_dir.name = "work4me-bridge"
-        with patch("pathlib.Path.iterdir", return_value=[mock_dir]), \
-             patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="State: ACTIVE")
-            results = dc.run_all()
+        results = dc.run_all()
     names = [r.name for r in results]
     assert "GNOME Extension" in names
+
+
+# ------------------------------------------------------------------
+# VS Code Extension install
+# ------------------------------------------------------------------
+
+def test_install_vscode_extension_success():
+    with patch("pathlib.Path.is_dir", return_value=True), \
+         patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        result = DoctorChecks.install_vscode_extension()
+    assert result.passed
+    assert "vsix" in result.detail
+
+
+def test_install_vscode_extension_source_missing():
+    with patch("pathlib.Path.is_dir", return_value=False):
+        result = DoctorChecks.install_vscode_extension()
+    assert not result.passed
+    assert "source not found" in result.detail

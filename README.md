@@ -81,17 +81,8 @@ The `work4me-bridge` extension runs a WebSocket server inside VS Code so Work4Me
 
 ```bash
 cd vscode-extension
-npm install && npm run compile
-```
-
-Install it:
-
-```bash
-# Dev mode — symlink into VS Code extensions
-ln -s "$(pwd)" ~/.vscode/extensions/work4me-bridge
-
-# Or load via CLI flag (Work4Me does this automatically on launch)
-code --extensions-dir /path/to/vscode-extension
+npm install && npm run vsix
+code --install-extension work4me-bridge-0.1.0.vsix
 ```
 
 The extension listens on `ws://localhost:9876` by default. Change the port in VS Code settings:

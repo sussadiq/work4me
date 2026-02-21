@@ -41,6 +41,21 @@ JSON over WebSocket: `{id, command, ...params}` → `{id, success, result?, erro
 
 `work4me/controllers/vscode.py` — `VSCodeController` class with methods mapping to each command above, plus `launch()`, `connect()`, `health_check()`, and `cleanup()`.
 
+### Extension Packaging
+
+The extension uses esbuild to bundle `ws` and all code into a single `out/extension.js`, then `@vscode/vsce` creates a `.vsix` for standard installation.
+
+```bash
+cd vscode-extension
+npm install            # install dev dependencies
+npm run compile        # dev build (with sourcemaps)
+npm run compile:types  # type-check only (tsc --noEmit)
+npm run vsix           # production build + create .vsix
+code --install-extension work4me-bridge-0.1.0.vsix
+```
+
+The `doctor.py` module can also build and install automatically via `DoctorChecks.install_vscode_extension()`.
+
 ---
 
 ## tmux (Fallback Terminal Layer)

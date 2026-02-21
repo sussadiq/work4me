@@ -112,7 +112,7 @@ async function dispatch(cmd: Command): Promise<unknown> {
     }
 
     case 'runTerminalCommand': {
-      const name = (cmd.name as string) || 'Work4Me';
+      const name = (cmd.name as string) || 'bash';
       let terminal = vscode.window.terminals.find(t => t.name === name);
       if (!terminal) {
         terminal = vscode.window.createTerminal(name);
