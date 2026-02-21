@@ -103,7 +103,8 @@ async def test_launch_creates_context_when_empty(controller):
 @pytest.mark.asyncio
 async def test_cleanup_waits_for_termination(controller):
     """cleanup() should await process.wait() after terminate()."""
-    mock_proc = AsyncMock()
+    mock_proc = MagicMock()
+    mock_proc.returncode = None
     mock_proc.wait = AsyncMock(return_value=0)
     controller._process = mock_proc
     controller._browser = None
@@ -119,7 +120,8 @@ async def test_cleanup_kills_if_terminate_hangs(controller):
     """cleanup() should escalate to kill() if terminate times out."""
     import asyncio as aio
 
-    mock_proc = AsyncMock()
+    mock_proc = MagicMock()
+    mock_proc.returncode = None
     mock_proc.wait = AsyncMock(return_value=0)
     controller._process = mock_proc
     controller._browser = None
