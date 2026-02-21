@@ -12,6 +12,7 @@ import logging
 import random
 import time
 
+from work4me.behavior.activity_monitor import ActivityMonitor, BehaviorAdjustment
 from work4me.behavior.typing import HumanTyper, TypedChar
 from work4me.config import Config
 
@@ -25,6 +26,19 @@ class BehaviorEngine:
         self.config = config
         self.typer = HumanTyper(config.typing)
         self._activity_events: list[tuple[float, str]] = []
+        self._activity_monitor: ActivityMonitor | None = None
+        self.speed_multiplier: float = 1.0
+
+    def set_activity_monitor(self, monitor: ActivityMonitor) -> None:
+        self._activity_monitor = monitor
+
+    def apply_adjustment(self, adjustment: BehaviorAdjustment) -> None:
+        if adjustment == BehaviorAdjustment.SLOW_DOWN:
+            self.speed_multiplier = min(3.0, self.speed_multiplier * 1.3)
+        elif adjustment == BehaviorAdjustment.SPEED_UP:
+            self.speed_multiplier = max(0.5, self.speed_multiplier * 0.8)
+        elif adjustment == BehaviorAdjustment.NONE:
+            self.speed_multiplier += (1.0 - self.speed_multiplier) * 0.1
 
     async def type_text(
         self,
@@ -150,6 +164,8 @@ class BehaviorEngine:
     def _record_event(self, kind: str) -> None:
         """Record an activity event for the activity monitor."""
         self._activity_events.append((time.monotonic(), kind))
+        if self._activity_monitor is not None:
+            self._activity_monitor.record_event(kind)
         # Keep only last 2 hours of events to prevent memory growth
         cutoff = time.monotonic() - 7200
         if len(self._activity_events) > 10000:

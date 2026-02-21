@@ -63,6 +63,7 @@ class Orchestrator:
 
         # Activity monitor
         self._activity_monitor = ActivityMonitor(config.activity)
+        self._behavior.set_activity_monitor(self._activity_monitor)
 
         # Timing
         self._start_time: float = 0
@@ -421,12 +422,11 @@ class Orchestrator:
     async def _check_activity_health(self) -> None:
         """Consult ActivityMonitor and adjust behavior if needed."""
         adjustment = self._activity_monitor.recommended_adjustment()
+        self._behavior.apply_adjustment(adjustment)
 
         if adjustment == BehaviorAdjustment.SLOW_DOWN:
             logger.debug("Activity too high — inserting idle pause")
             await self._behavior.idle_think(15.0)
-        elif adjustment == BehaviorAdjustment.SPEED_UP:
-            pass  # Next activity will execute normally
         elif adjustment == BehaviorAdjustment.ADD_MOUSE:
             self._activity_monitor.record_event("mouse")
 
