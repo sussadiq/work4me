@@ -18,13 +18,8 @@ NVIM_SOCKET = "/tmp/work4me-nvim.sock"
 class EditorController:
     """Controls Neovim via RPC for state queries and tmux for visible actions."""
 
-    def __init__(
-        self,
-        nvim_socket: str = NVIM_SOCKET,
-        editor_pane: str = "work4me:0.1",
-    ) -> None:
+    def __init__(self, nvim_socket: str = NVIM_SOCKET) -> None:
         self.nvim_socket = nvim_socket
-        self.editor_pane = editor_pane
         self._nvim = None
 
     async def connect(self) -> None:
@@ -32,7 +27,9 @@ class EditorController:
         try:
             import pynvim
 
-            self._nvim = pynvim.attach("socket", path=self.nvim_socket)
+            self._nvim = await asyncio.to_thread(
+                pynvim.attach, "socket", path=self.nvim_socket
+            )
             logger.info("Connected to Neovim at %s", self.nvim_socket)
         except Exception as exc:
             logger.warning("Could not connect to Neovim: %s", exc)
@@ -47,9 +44,9 @@ class EditorController:
             await self.connect()
         if self._nvim:
             try:
-                self._nvim.command(f":e {file_path}")
+                await asyncio.to_thread(self._nvim.command, f":e {file_path}")
                 if line > 1:
-                    self._nvim.command(f":{line}")
+                    await asyncio.to_thread(self._nvim.command, f":{line}")
                 logger.debug("Opened %s at line %d", file_path, line)
             except Exception as exc:
                 logger.warning("Failed to open file in Neovim: %s", exc)
@@ -58,7 +55,10 @@ class EditorController:
         """Get current cursor position (row, col)."""
         if self._nvim:
             try:
-                return tuple(self._nvim.current.window.cursor)  # type: ignore
+                cursor = await asyncio.to_thread(
+                    lambda: self._nvim.current.window.cursor
+                )
+                return (cursor[0], cursor[1])
             except Exception:
                 pass
         return (1, 0)
@@ -67,7 +67,9 @@ class EditorController:
         """Get current buffer content as list of lines."""
         if self._nvim:
             try:
-                return list(self._nvim.current.buffer[:])
+                return await asyncio.to_thread(
+                    lambda: list(self._nvim.current.buffer[:])
+                )
             except Exception:
                 pass
         return []
@@ -76,7 +78,9 @@ class EditorController:
         """Get the path of the currently open file."""
         if self._nvim:
             try:
-                return str(self._nvim.current.buffer.name)
+                return await asyncio.to_thread(
+                    lambda: str(self._nvim.current.buffer.name)
+                )
             except Exception:
                 pass
         return ""
@@ -86,7 +90,7 @@ class EditorController:
         if self._nvim is None:
             return False
         try:
-            self._nvim.command("echo ''")
+            await asyncio.to_thread(self._nvim.command, "echo ''")
             return True
         except Exception:
             return False
@@ -101,7 +105,7 @@ class EditorController:
         """Close Neovim connection."""
         if self._nvim:
             try:
-                self._nvim.close()
+                await asyncio.to_thread(self._nvim.close)
             except Exception:
                 pass
             self._nvim = None

@@ -152,10 +152,13 @@ class TerminalController:
     async def health_check(self) -> bool:
         """Check if the tmux session is alive."""
         try:
-            result = await self._tmux(
-                "has-session", "-t", self.session_name, check=False, capture=True
+            proc = await asyncio.create_subprocess_exec(
+                "tmux", "has-session", "-t", self.session_name,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
             )
-            return True
+            await proc.wait()
+            return proc.returncode == 0
         except Exception:
             return False
 

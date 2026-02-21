@@ -55,6 +55,7 @@ class ClaudeCodeManager:
     def __init__(self, config: ClaudeConfig) -> None:
         self.config = config
         self._process: asyncio.subprocess.Process | None = None
+        self._last_session_id: str = ""
 
     def _build_command(
         self,
@@ -116,6 +117,7 @@ class ClaudeCodeManager:
         result = SessionResult()
 
         try:
+            self._last_session_id = ""
             self._process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
@@ -131,6 +133,7 @@ class ClaudeCodeManager:
 
             await self._process.wait()
             result.exit_code = self._process.returncode or 0
+            result.session_id = self._last_session_id
 
             if result.exit_code != 0:
                 stderr_bytes = await self._process.stderr.read()
@@ -201,9 +204,14 @@ class ClaudeCodeManager:
     ) -> AsyncIterator[CapturedAction]:
         """Parse newline-delimited JSON from Claude Code stdout.
 
-        Extracts tool_use events where the tool is Edit, Write, or Bash
-        and converts them into CapturedAction objects.
+        Extracts tool_use events where the tool is Edit, Write, or Bash.
+        Only captures from complete 'assistant' message events (not partial
+        streaming events like content_block_start which have empty input).
+
+        Deduplicates by tracking tool_use IDs already seen.
         """
+        seen_tool_ids: set[str] = set()
+
         async for raw_line in stdout:
             line = raw_line.decode(errors="replace").strip()
             if not line:
@@ -215,38 +223,49 @@ class ClaudeCodeManager:
                 logger.debug("Non-JSON line from Claude: %s", line[:100])
                 continue
 
-            action = self._extract_action(event)
-            if action is not None:
-                yield action
+            for action in self._extract_actions(event):
+                # Deduplicate using a hash of the action content
+                action_key = f"{action.kind.value}:{action.file_path}:{action.command}:{hash(action.new_string or action.content)}"
+                if action_key not in seen_tool_ids:
+                    seen_tool_ids.add(action_key)
+                    yield action
 
-    def _extract_action(self, event: dict) -> CapturedAction | None:
-        """Extract a CapturedAction from a stream-json event, if applicable."""
-        # Tool use events contain the actions we care about
-        # The stream-json format varies — handle multiple structures
+    def _extract_actions(self, event: dict) -> list[CapturedAction]:
+        """Extract CapturedActions from a stream-json event.
+
+        Only captures from complete events (assistant messages with full input),
+        not from partial streaming events (content_block_start has empty input).
+        """
+        actions: list[CapturedAction] = []
         event_type = event.get("type", "")
 
-        # Direct tool_use content block
-        if event_type == "content_block_start":
-            block = event.get("content_block", {})
-            if block.get("type") == "tool_use":
-                return self._parse_tool_use(block)
+        # Assistant message — contains complete tool_use blocks with full input
+        if event_type == "assistant":
+            message = event.get("message", {})
+            content = message.get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        action = self._parse_tool_use(block)
+                        if action is not None:
+                            actions.append(action)
 
-        # Tool use in message content
-        if event_type == "message" or event_type == "result":
+        # Result event — final message, also has session_id
+        if event_type == "result":
+            # Extract session_id
+            session_id = event.get("session_id", "")
+            if session_id:
+                self._last_session_id = session_id
+
             content = event.get("content", [])
             if isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "tool_use":
                         action = self._parse_tool_use(block)
                         if action is not None:
-                            return action
+                            actions.append(action)
 
-        # Nested in stream_event wrapper
-        if event_type == "stream_event":
-            inner = event.get("event", {})
-            return self._extract_action(inner)
-
-        return None
+        return actions
 
     def _parse_tool_use(self, block: dict) -> CapturedAction | None:
         """Parse a tool_use block into a CapturedAction."""

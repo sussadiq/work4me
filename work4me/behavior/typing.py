@@ -14,8 +14,6 @@ import random
 import string
 from dataclasses import dataclass
 
-import numpy as np
-
 from work4me.config import TypingConfig
 
 # Common fast bigrams (same-hand or common sequences)
@@ -53,9 +51,8 @@ class HumanTyper:
 
     def __init__(self, config: TypingConfig) -> None:
         self.config = config
-        self.rng = np.random.default_rng()
+        self._rng = random.Random()
         self._burst_remaining = 0
-        self._in_burst = False
 
     def generate_sequence(self, text: str, is_code: bool = True) -> list[TypedChar]:
         """Generate a sequence of TypedChar with realistic timing.
@@ -67,6 +64,9 @@ class HumanTyper:
         Returns:
             List of TypedChar objects with delays and error flags.
         """
+        # Reset burst state between calls
+        self._burst_remaining = 0
+
         result: list[TypedChar] = []
         prev_char = ""
         cfg = self.config
@@ -81,17 +81,17 @@ class HumanTyper:
 
             # Think pause at natural boundaries
             if self._should_think_pause(char, i, text):
-                pause = self.rng.uniform(cfg.think_pause_min, cfg.think_pause_max)
+                pause = self._rng.uniform(cfg.think_pause_min, cfg.think_pause_max)
                 delay += pause
 
             # Line boundary pause
             if char == "\n" and prev_char != "\n":
-                delay += self.rng.uniform(0.3, 1.5)
+                delay += self._rng.uniform(0.3, 1.5)
 
             # Error injection
             is_error = (
                 char in string.ascii_letters
-                and random.random() < cfg.error_rate
+                and self._rng.random() < cfg.error_rate
             )
 
             result.append(TypedChar(char=char, delay_before=delay, is_error=is_error))
@@ -126,15 +126,14 @@ class HumanTyper:
         if self._burst_remaining > 0:
             delay /= cfg.burst_speed_multiplier
             self._burst_remaining -= 1
-        elif random.random() < 0.15:
+        elif self._rng.random() < 0.15:
             # Start a new burst
-            self._burst_remaining = random.randint(
+            self._burst_remaining = self._rng.randint(
                 cfg.burst_length_min, cfg.burst_length_max
             )
-            self._in_burst = True
 
         # Gaussian noise
-        noise = self.rng.normal(0, cfg.inter_key_delay_sigma)
+        noise = self._rng.gauss(0, cfg.inter_key_delay_sigma)
         delay += noise
 
         # Clamp to sane range
@@ -143,28 +142,36 @@ class HumanTyper:
         return delay
 
     def _should_think_pause(self, char: str, index: int, text: str) -> bool:
-        """Determine if we should insert a think pause before this character."""
-        if random.random() > self.config.think_pause_probability:
-            return False
+        """Determine if we should insert a think pause before this character.
 
-        # More likely at line starts
+        Probability is higher at natural boundaries (line starts, after braces).
+        Base probability: 3%. At boundaries: ~15%.
+        """
+        base_prob = self.config.think_pause_probability
+        prob = base_prob
+
+        # 5x more likely at line starts (new statement)
         if index > 0 and text[index - 1] == "\n":
-            return True
+            prob = min(base_prob * 5, 0.25)
 
-        # More likely after opening braces (entering a block)
+        # 4x more likely after opening braces (entering a block)
         if index > 0 and text[index - 1] in "{(:":
-            return True
+            prob = min(base_prob * 4, 0.20)
 
-        return True
+        # 3x more likely after semicolons/closing braces (finished a statement)
+        if index > 0 and text[index - 1] in ";})":
+            prob = min(base_prob * 3, 0.15)
+
+        return self._rng.random() < prob
 
     def get_typo_char(self, intended: str) -> str:
         """Get a realistic typo character (adjacent key on keyboard)."""
         lower = intended.lower()
         if lower in ADJACENT_KEYS:
             adjacent = ADJACENT_KEYS[lower]
-            typo = random.choice(adjacent)
+            typo = self._rng.choice(adjacent)
             if intended.isupper():
                 typo = typo.upper()
             return typo
         # Fallback: random letter
-        return random.choice(string.ascii_lowercase)
+        return self._rng.choice(string.ascii_lowercase)
