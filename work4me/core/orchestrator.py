@@ -603,7 +603,7 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     async def _execute_browser(self, activity: Activity) -> None:
-        """Browse URLs from activity search queries."""
+        """Browse URLs from activity search queries with clicking and interaction."""
         if not await self._browser_ctrl.health_check():
             logger.warning("Browser not available, skipping browser activity: %s", activity.description[:60])
             # Fall back to a thinking pause instead
@@ -616,10 +616,21 @@ class Orchestrator:
             try:
                 await self._browser_ctrl.search(query)
                 await asyncio.sleep(2.0)
+                await self._browser_ctrl.dismiss_cookie_banner()
+                await self._browser_ctrl.handle_captcha()
 
-                # Scroll and read
-                await self._browser_ctrl.scroll_down(pixels=400)
-                await asyncio.sleep(3.0)
+                # Click on a search result heading
+                try:
+                    await self._browser_ctrl.click("h3", timeout=3000)
+                    await asyncio.sleep(2.0)
+                    await self._browser_ctrl.dismiss_cookie_banner()
+                except Exception:
+                    pass  # No matching link — fall through to scroll
+
+                # Scroll and read content
+                for _ in range(random.randint(2, 3)):
+                    await self._browser_ctrl.scroll_down(pixels=random.randint(200, 500))
+                    await asyncio.sleep(random.uniform(2.0, 5.0))
 
                 self._activity_monitor.record_event("mouse")
             except Exception as exc:
@@ -697,7 +708,7 @@ class Orchestrator:
         await self._behavior.idle_think(total_seconds)
 
     async def _research_with_browser(self, queries: list[str], total_seconds: float) -> None:
-        """Browse research queries with natural reading pauses."""
+        """Browse research queries with clicking, cookie dismissal, and reading."""
         await self._focus_app_window(self.config.browser.window_class)
         time_per_query = total_seconds / max(len(queries), 1)
 
@@ -706,13 +717,33 @@ class Orchestrator:
             try:
                 await self._browser_ctrl.search(query)
                 await asyncio.sleep(2.0)
+                await self._browser_ctrl.dismiss_cookie_banner()
+                await self._browser_ctrl.handle_captcha()
 
-                # Read and scroll through results (simulates reading)
-                for _ in range(random.randint(2, 4)):
-                    await self._browser_ctrl.scroll_down(pixels=random.randint(200, 500))
-                    read_pause = random.uniform(3.0, 8.0)
-                    await asyncio.sleep(read_pause)
-                    self._activity_monitor.record_event("mouse")
+                # Click first 2-3 organic result links
+                result_links = ["h3", "a h3", "[data-header-feature] a"]
+                clicked = 0
+                for link_sel in result_links:
+                    if clicked >= 2:
+                        break
+                    try:
+                        await self._browser_ctrl.click(link_sel, timeout=2000)
+                        clicked += 1
+                        await asyncio.sleep(2.0)
+                        await self._browser_ctrl.dismiss_cookie_banner()
+
+                        # Read the page
+                        for _ in range(random.randint(2, 4)):
+                            await self._browser_ctrl.scroll_down(
+                                pixels=random.randint(200, 500)
+                            )
+                            await asyncio.sleep(random.uniform(3.0, 8.0))
+                            self._activity_monitor.record_event("mouse")
+
+                        await self._browser_ctrl.go_back()
+                        await asyncio.sleep(1.0)
+                    except Exception:
+                        continue
 
                 # Think pause between queries
                 think_pause = random.uniform(5.0, 15.0)

@@ -84,11 +84,30 @@ class VSCodeConfig:
 
 
 @dataclass
+class BrowserMouseConfig:
+    step_interval_min: float = 0.008
+    step_interval_max: float = 0.016
+    overshoot_probability: float = 0.15
+    click_delay_min: float = 0.05
+    click_delay_max: float = 0.15
+
+
+@dataclass
+class CaptchaConfig:
+    enabled: bool = True
+    anthropic_model: str = "claude-sonnet-4-20250514"
+    max_attempts: int = 3
+    screenshot_timeout: float = 5000.0
+
+
+@dataclass
 class BrowserConfig:
     enabled: bool = True
     user_data_dir: str = ""
     window_class: str = "firefox"
     launch_timeout: float = 30000.0
+    mouse: BrowserMouseConfig = field(default_factory=BrowserMouseConfig)
+    captcha: CaptchaConfig = field(default_factory=CaptchaConfig)
 
 
 @dataclass
@@ -141,12 +160,17 @@ def load_config(path: Path | None = None) -> Config:
 
 
 def _apply_toml(config: Config, data: dict[str, Any]) -> None:
-    """Apply TOML dict onto Config dataclass (one level of nesting)."""
+    """Apply TOML dict onto Config dataclass (up to two levels of nesting)."""
     for key, value in data.items():
         if isinstance(value, dict) and hasattr(config, key):
             sub = getattr(config, key)
             for sk, sv in value.items():
-                if hasattr(sub, sk):
+                if isinstance(sv, dict) and hasattr(sub, sk):
+                    sub2 = getattr(sub, sk)
+                    for sk2, sv2 in sv.items():
+                        if hasattr(sub2, sk2):
+                            setattr(sub2, sk2, sv2)
+                elif hasattr(sub, sk):
                     setattr(sub, sk, sv)
         elif hasattr(config, key):
             setattr(config, key, value)

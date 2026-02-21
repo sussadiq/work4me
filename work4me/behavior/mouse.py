@@ -1,5 +1,7 @@
 """Human-like mouse movement simulation using Bezier curves and Fitts's law."""
 
+from __future__ import annotations
+
 import math
 import random
 from dataclasses import dataclass

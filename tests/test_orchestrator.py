@@ -557,3 +557,83 @@ async def test_fallback_plan_creates_single_activity():
     assert all_activities[0].kind == ActivityKind.CODING
     assert all_activities[0].estimated_minutes == 70
     assert all_activities[0].description == "Build auth system"
+
+
+# ------------------------------------------------------------------
+# Enhanced browser interaction tests
+# ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_dismisses_cookies(orchestrator):
+    """_execute_browser should dismiss cookie banners after searching."""
+    activity = Activity(
+        ActivityKind.BROWSER, "Research JWT", 10,
+        [], [], ["jwt middleware"], [],
+    )
+    orchestrator._browser_ctrl = AsyncMock()
+    orchestrator._browser_ctrl.health_check = AsyncMock(return_value=True)
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    with patch("work4me.core.orchestrator.asyncio.sleep", new_callable=AsyncMock):
+        await orchestrator._execute_browser(activity)
+
+    orchestrator._browser_ctrl.dismiss_cookie_banner.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_handles_captcha(orchestrator):
+    """_execute_browser should check for CAPTCHAs after searching."""
+    activity = Activity(
+        ActivityKind.BROWSER, "Research JWT", 10,
+        [], [], ["jwt middleware"], [],
+    )
+    orchestrator._browser_ctrl = AsyncMock()
+    orchestrator._browser_ctrl.health_check = AsyncMock(return_value=True)
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    with patch("work4me.core.orchestrator.asyncio.sleep", new_callable=AsyncMock):
+        await orchestrator._execute_browser(activity)
+
+    orchestrator._browser_ctrl.handle_captcha.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_execute_browser_clicks_results(orchestrator):
+    """_execute_browser should try to click search result headings."""
+    activity = Activity(
+        ActivityKind.BROWSER, "Research JWT", 10,
+        [], [], ["jwt middleware"], [],
+    )
+    orchestrator._browser_ctrl = AsyncMock()
+    orchestrator._browser_ctrl.health_check = AsyncMock(return_value=True)
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    with patch("work4me.core.orchestrator.asyncio.sleep", new_callable=AsyncMock):
+        await orchestrator._execute_browser(activity)
+
+    # Should attempt to click an h3 heading (search result)
+    orchestrator._browser_ctrl.click.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_research_with_browser_clicks_and_navigates_back(orchestrator):
+    """_research_with_browser should click results and go back."""
+    orchestrator._browser_ctrl = AsyncMock()
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    with patch("work4me.core.orchestrator.asyncio.sleep", new_callable=AsyncMock):
+        await orchestrator._research_with_browser(["test query"], total_seconds=30.0)
+
+    orchestrator._browser_ctrl.dismiss_cookie_banner.assert_called()
+    orchestrator._browser_ctrl.handle_captcha.assert_called()
+    orchestrator._browser_ctrl.click.assert_called()
+    orchestrator._browser_ctrl.go_back.assert_called()

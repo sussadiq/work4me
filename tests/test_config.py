@@ -1,5 +1,8 @@
 from pathlib import Path
-from work4me.config import Config, DesktopConfig, ClaudeConfig, BrowserConfig, VSCodeConfig, MicroPauseConfig, load_config
+from work4me.config import (
+    Config, DesktopConfig, ClaudeConfig, BrowserConfig, VSCodeConfig,
+    MicroPauseConfig, BrowserMouseConfig, CaptchaConfig, load_config,
+)
 
 
 def test_config_has_mode():
@@ -125,3 +128,67 @@ frequency_per_activity = 0.5
     assert config.micro_pause.min_seconds == 20.0
     assert config.micro_pause.max_seconds == 45.0
     assert config.micro_pause.frequency_per_activity == 0.5
+
+
+# --- BrowserMouseConfig and CaptchaConfig ---
+
+
+def test_browser_mouse_config_defaults():
+    config = BrowserMouseConfig()
+    assert config.step_interval_min == 0.008
+    assert config.step_interval_max == 0.016
+    assert config.overshoot_probability == 0.15
+    assert config.click_delay_min == 0.05
+    assert config.click_delay_max == 0.15
+
+
+def test_captcha_config_defaults():
+    config = CaptchaConfig()
+    assert config.enabled is True
+    assert "claude" in config.anthropic_model
+    assert config.max_attempts == 3
+    assert config.screenshot_timeout == 5000.0
+
+
+def test_browser_config_has_mouse_and_captcha():
+    config = BrowserConfig()
+    assert isinstance(config.mouse, BrowserMouseConfig)
+    assert isinstance(config.captcha, CaptchaConfig)
+
+
+def test_toml_two_level_nesting_browser_mouse(tmp_path):
+    """TOML [browser.mouse] should apply to BrowserMouseConfig."""
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text("""
+[browser.mouse]
+step_interval_min = 0.01
+click_delay_max = 0.20
+
+[browser.captcha]
+enabled = false
+max_attempts = 5
+""")
+    config = load_config(toml_file)
+    assert config.browser.mouse.step_interval_min == 0.01
+    assert config.browser.mouse.click_delay_max == 0.20
+    assert config.browser.captcha.enabled is False
+    assert config.browser.captcha.max_attempts == 5
+
+
+def test_toml_two_level_nesting_preserves_other_fields(tmp_path):
+    """Two-level nesting should not break one-level fields."""
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text("""
+[browser]
+enabled = false
+window_class = "chrome"
+
+[browser.mouse]
+overshoot_probability = 0.25
+""")
+    config = load_config(toml_file)
+    assert config.browser.enabled is False
+    assert config.browser.window_class == "chrome"
+    assert config.browser.mouse.overshoot_probability == 0.25
+    # Other mouse defaults preserved
+    assert config.browser.mouse.step_interval_min == 0.008

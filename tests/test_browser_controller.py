@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import quote_plus
-from work4me.controllers.browser import BrowserController
+from work4me.controllers.browser import BrowserController, COOKIE_SELECTORS
 from work4me.config import BrowserConfig
 
 @pytest.fixture
@@ -306,3 +306,195 @@ async def test_cleanup_handles_context_close_error():
     # Should still attempt to stop playwright despite context close failure
     mock_pw.stop.assert_called_once()
     assert ctrl._browser_available is False
+
+
+# --- New browser interaction tests ---
+
+
+@pytest.fixture
+def ready_controller():
+    """Controller with mock page and mouse already set up."""
+    config = BrowserConfig()
+    ctrl = BrowserController(config)
+    ctrl._page = AsyncMock()
+    ctrl._context = AsyncMock()
+    ctrl._browser_available = True
+    ctrl._mouse = AsyncMock()
+    ctrl._captcha_detector = AsyncMock()
+    ctrl._captcha_solver = AsyncMock()
+    return ctrl
+
+
+@pytest.mark.asyncio
+async def test_click_uses_browser_mouse(ready_controller):
+    """click() should use BrowserMouse when available."""
+    await ready_controller.click("button.submit")
+    ready_controller._mouse.click_element.assert_called_once_with(
+        ready_controller._page, "button.submit", timeout=5000
+    )
+
+
+@pytest.mark.asyncio
+async def test_click_fallback_without_mouse(ready_controller):
+    """click() should fall back to page.click when no BrowserMouse."""
+    ready_controller._mouse = None
+    await ready_controller.click("button.submit")
+    ready_controller._page.click.assert_called_once_with("button.submit", timeout=5000)
+
+
+@pytest.mark.asyncio
+async def test_click_link(ready_controller):
+    """click_link() should find link by text and click."""
+    await ready_controller.click_link("Documentation")
+    ready_controller._mouse.click_element.assert_called_once()
+    selector_arg = ready_controller._mouse.click_element.call_args[0][1]
+    assert "Documentation" in selector_arg
+
+
+@pytest.mark.asyncio
+async def test_fill_field(ready_controller):
+    """fill_field() should click, clear, and type with delay."""
+    await ready_controller.fill_field("#email", "test@example.com")
+    ready_controller._mouse.click_element.assert_called_once()
+    ready_controller._page.fill.assert_called_once_with("#email", "")
+    ready_controller._page.type.assert_called_once_with(
+        "#email", "test@example.com", delay=85
+    )
+
+
+@pytest.mark.asyncio
+async def test_dismiss_cookie_banner_finds_accept(ready_controller):
+    """dismiss_cookie_banner() should click first visible cookie button."""
+    mock_locator = AsyncMock()
+    mock_locator.is_visible = AsyncMock(return_value=True)
+    # page.locator() is synchronous in Playwright
+    mock_loc_chain = MagicMock()
+    mock_loc_chain.first = mock_locator
+    ready_controller._page.locator = MagicMock(return_value=mock_loc_chain)
+
+    result = await ready_controller.dismiss_cookie_banner()
+    assert result is True
+    ready_controller._mouse.click_element.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_dismiss_cookie_banner_none_found(ready_controller):
+    """dismiss_cookie_banner() should return False when no banner found."""
+    mock_locator = AsyncMock()
+    mock_locator.is_visible = AsyncMock(return_value=False)
+    mock_loc_chain = MagicMock()
+    mock_loc_chain.first = mock_locator
+    ready_controller._page.locator = MagicMock(return_value=mock_loc_chain)
+
+    result = await ready_controller.dismiss_cookie_banner()
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_handle_captcha_none_detected(ready_controller):
+    """handle_captcha() should return False when no CAPTCHA detected."""
+    ready_controller._captcha_detector.detect = AsyncMock(return_value=None)
+    result = await ready_controller.handle_captcha()
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_handle_captcha_detected_and_solved(ready_controller):
+    """handle_captcha() should detect and solve CAPTCHA."""
+    mock_captcha = MagicMock()
+    mock_captcha.kind = "recaptcha"
+    ready_controller._captcha_detector.detect = AsyncMock(return_value=mock_captcha)
+    ready_controller._captcha_solver.solve = AsyncMock(return_value=True)
+
+    result = await ready_controller.handle_captcha()
+    assert result is True
+    ready_controller._captcha_solver.solve.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_navigate_with_captcha_check(ready_controller):
+    """navigate_with_captcha_check() should navigate, dismiss cookies, handle CAPTCHA."""
+    ready_controller.navigate = AsyncMock()
+    ready_controller.dismiss_cookie_banner = AsyncMock(return_value=False)
+    ready_controller.handle_captcha = AsyncMock(return_value=False)
+
+    with patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock):
+        await ready_controller.navigate_with_captcha_check("https://example.com")
+
+    ready_controller.navigate.assert_called_once_with("https://example.com")
+    ready_controller.dismiss_cookie_banner.assert_called_once()
+    ready_controller.handle_captcha.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_screenshot(ready_controller):
+    """screenshot() should call page.screenshot."""
+    ready_controller._page.screenshot = AsyncMock(return_value=b"png-data")
+    result = await ready_controller.screenshot()
+    assert result == b"png-data"
+
+
+@pytest.mark.asyncio
+async def test_screenshot_with_clip(ready_controller):
+    """screenshot() should pass clip parameter."""
+    ready_controller._page.screenshot = AsyncMock(return_value=b"clipped")
+    clip = {"x": 10, "y": 20, "width": 100, "height": 50}
+    result = await ready_controller.screenshot(clip=clip)
+    assert result == b"clipped"
+    call_kwargs = ready_controller._page.screenshot.call_args[1]
+    assert call_kwargs["clip"] == clip
+
+
+@pytest.mark.asyncio
+async def test_current_url(ready_controller):
+    """current_url() should return the page URL."""
+    ready_controller._page.url = "https://example.com/page"
+    url = await ready_controller.current_url()
+    assert url == "https://example.com/page"
+
+
+@pytest.mark.asyncio
+async def test_go_back(ready_controller):
+    """go_back() should call page.go_back."""
+    await ready_controller.go_back()
+    ready_controller._page.go_back.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_go_forward(ready_controller):
+    """go_forward() should call page.go_forward."""
+    await ready_controller.go_forward()
+    ready_controller._page.go_forward.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_cookies(ready_controller):
+    """get_cookies() should return cookies from context."""
+    ready_controller._context.cookies = AsyncMock(
+        return_value=[{"name": "session", "value": "abc"}]
+    )
+    cookies = await ready_controller.get_cookies()
+    assert len(cookies) == 1
+    assert cookies[0]["name"] == "session"
+
+
+@pytest.mark.asyncio
+async def test_set_cookies(ready_controller):
+    """set_cookies() should add cookies to context."""
+    cookies = [{"name": "token", "value": "xyz", "url": "https://example.com"}]
+    await ready_controller.set_cookies(cookies)
+    ready_controller._context.add_cookies.assert_called_once_with(cookies)
+
+
+def test_cookie_selectors_not_empty():
+    """COOKIE_SELECTORS should have common accept button patterns."""
+    assert len(COOKIE_SELECTORS) >= 5
+    assert any("Accept" in s for s in COOKIE_SELECTORS)
+
+
+def test_controller_init_has_mouse_and_captcha_fields():
+    """Constructor should initialize mouse/captcha fields to None."""
+    ctrl = BrowserController(BrowserConfig())
+    assert ctrl._mouse is None
+    assert ctrl._captcha_detector is None
+    assert ctrl._captcha_solver is None
