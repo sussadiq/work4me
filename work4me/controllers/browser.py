@@ -132,6 +132,12 @@ class BrowserController:
         except Exception:
             return False
 
+    async def restart(self) -> None:
+        """Cleanup and relaunch browser."""
+        logger.info("Restarting browser...")
+        await self.cleanup()
+        await self.launch()
+
     async def cleanup(self) -> None:
         """Disconnect from browser (don't close it)."""
         try:

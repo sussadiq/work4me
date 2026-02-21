@@ -127,6 +127,17 @@ class VSCodeController:
         except Exception:
             return False
 
+    async def restart(self) -> None:
+        """Close and reconnect to VS Code bridge."""
+        logger.info("Restarting VS Code connection...")
+        if self._ws:
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+        await self.connect()
+
     async def cleanup(self) -> None:
         """Close the WebSocket connection."""
         if self._ws:

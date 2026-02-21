@@ -50,3 +50,12 @@ async def test_get_page_text(controller):
 @pytest.mark.asyncio
 async def test_health_check_no_browser(controller):
     assert await controller.health_check() is False
+
+
+@pytest.mark.asyncio
+async def test_restart_relaunches(controller):
+    with patch.object(controller, 'cleanup', new_callable=AsyncMock) as mock_cleanup, \
+         patch.object(controller, 'launch', new_callable=AsyncMock) as mock_launch:
+        await controller.restart()
+        mock_cleanup.assert_called_once()
+        mock_launch.assert_called_once()

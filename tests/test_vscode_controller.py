@@ -2,7 +2,7 @@
 import asyncio
 import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch  # noqa: F811
 from work4me.controllers.vscode import VSCodeController
 from work4me.config import VSCodeConfig
 
@@ -64,3 +64,13 @@ async def test_health_check_with_connection(controller):
     controller.send_command = AsyncMock(return_value={"pong": True})
     controller._ws = MagicMock()
     assert await controller.health_check() is True
+
+
+@pytest.mark.asyncio
+async def test_restart_reconnects(controller):
+    controller._ws = MagicMock()
+    controller._ws.close = AsyncMock()
+    with patch.object(controller, 'connect', new_callable=AsyncMock) as mock_connect:
+        await controller.restart()
+        mock_connect.assert_called_once()
+    assert controller._ws is None or mock_connect.called
