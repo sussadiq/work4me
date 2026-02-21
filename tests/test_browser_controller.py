@@ -31,7 +31,9 @@ async def test_search_types_query(controller):
     controller._page = mock_page
     controller.navigate = AsyncMock()
     await controller.search("jwt middleware express")
-    controller.navigate.assert_called()
+    url_arg = controller.navigate.call_args[0][0]
+    assert "google.com/search" in url_arg
+    assert quote_plus("jwt middleware express") in url_arg
 
 @pytest.mark.asyncio
 async def test_scroll_down(controller):

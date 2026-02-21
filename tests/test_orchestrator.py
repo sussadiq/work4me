@@ -64,7 +64,8 @@ async def test_execute_activity_coding_mode_a(orchestrator):
     )
 
     await orchestrator._execute_activity(activity, working_dir="/tmp")
-    orchestrator._claude.execute.assert_called_once()
+    call_kwargs = orchestrator._claude.execute.call_args
+    assert call_kwargs[1]["working_dir"] == "/tmp" or call_kwargs[0][1] == "/tmp"
 
 
 @pytest.mark.asyncio
@@ -81,7 +82,7 @@ async def test_execute_activity_browser(orchestrator):
     )
 
     await orchestrator._execute_activity(activity, working_dir="/tmp")
-    orchestrator._browser_ctrl.search.assert_called()
+    orchestrator._browser_ctrl.search.assert_called_once_with("jwt express middleware")
 
 
 @pytest.mark.asyncio
