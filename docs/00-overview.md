@@ -10,15 +10,22 @@ AI tools like Claude Code can complete engineering tasks in minutes. But remote 
 
 ## The Core Architectural Insight
 
-Claude Code runs headless doing real work at full speed, and Work4Me intercepts its actions (via stream-json) and **replays them visibly** through desktop applications at human speed. The work is real; the pacing is simulated.
+Work4Me operates in two modes:
+
+**Mode A (Manual Developer):** Claude Code runs headless per-activity, Work4Me replays actions visibly in VS Code at human speed. The work is real; the pacing is simulated.
+
+**Mode B (AI-Assisted Developer):** Work4Me types prompts into a visible Claude Code terminal session, reviews output in VS Code. This imitates how developers actually use AI tools in 2026.
 
 ```
-Claude Code (headless, fast)     Work4Me (visible, paced)
-         |                              |
-  Writes auth.ts in 5 sec  -->  Types auth.ts char-by-char at 60 WPM over 15 min
-  Runs "npm test" in 1 sec -->  Types "npm test" visibly, watches output
-  Searches docs mentally   -->  Opens browser, scrolls Stack Overflow
+Mode A:                                    Mode B:
+Claude Code (headless)  Work4Me (visible)  Work4Me types prompts → Claude Code (visible)
+        |                      |                     |                      |
+  Writes auth.ts  -->  Types in VS Code      Types prompt  -->  Claude writes visibly
+  Runs npm test   -->  Types in terminal     Reviews output -->  Scrolls VS Code
+  Plans research  -->  Opens browser         Makes tweaks  -->  Types in VS Code
 ```
+
+Both modes use interleaved execution — Claude Code runs per-activity (not batch), enabling real debugging and adaptive behavior. Cost: zero per-invocation (Claude Code Max plan).
 
 ## What It Must Do
 
@@ -44,9 +51,9 @@ Claude Code (headless, fast)     Work4Me (visible, paced)
 |---|---|---|
 | Language | Python 3.11+ with asyncio | Best D-Bus, desktop automation, terminal control ecosystem |
 | Input simulation | ydotool/dotool (universal) + RemoteDesktop portal (GNOME) | Only universal Wayland input methods |
-| AI engine | Claude Code CLI (`claude -p --output-format stream-json`) | Full headless support, stream parsing |
-| Terminal | tmux (universal) + Kitty/WezTerm (rich control) | `send-keys` + `capture-pane` |
-| Editor | Neovim (via pynvim RPC) | Best programmatic control of any editor |
+| AI engine | Claude Code CLI (headless + interactive modes) | stream-json for both input and output |
+| IDE | VS Code + custom WebSocket extension | Universal screenshot credibility, precise programmatic control |
+| Terminal | VS Code integrated terminal + tmux fallback | Visible terminal commands |
 | Browser | Chromium via CDP/Playwright | `--remote-debugging-port` + visible window |
 | Distribution | Tarball + install script | Flatpak/Snap blocked by sandbox |
 
@@ -67,3 +74,4 @@ Claude Code (headless, fast)     Work4Me (visible, paced)
 | `10-implementation-roadmap.md` | Phased development plan with milestones |
 | `11-distribution.md` | Packaging, dependencies, setup flow, permissions |
 | `12-prior-art.md` | Existing tools, AI desktop agents, time tracker analysis |
+| `plans/2026-02-21-architecture-validation-design.md` | Architecture revision — dual-mode, VS Code, interleaved execution |
