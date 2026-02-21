@@ -1,4 +1,5 @@
-from work4me.config import Config, DesktopConfig, ClaudeConfig, BrowserConfig, VSCodeConfig
+from pathlib import Path
+from work4me.config import Config, DesktopConfig, ClaudeConfig, BrowserConfig, VSCodeConfig, load_config
 
 
 def test_config_has_mode():
@@ -35,3 +36,43 @@ def test_config_has_vscode_and_browser():
     config = Config()
     assert isinstance(config.vscode, VSCodeConfig)
     assert isinstance(config.browser, BrowserConfig)
+
+
+def test_load_config_from_toml(tmp_path):
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text("""
+mode = "ai-assisted"
+log_level = "DEBUG"
+
+[typing]
+wpm_code = 100.0
+
+[activity]
+target_ratio_min = 0.50
+
+[claude]
+model = "opus"
+
+[vscode]
+websocket_port = 8888
+""")
+    config = load_config(toml_file)
+    assert config.typing.wpm_code == 100.0
+    assert config.activity.target_ratio_min == 0.50
+    assert config.claude.model == "opus"
+    assert config.vscode.websocket_port == 8888
+    assert config.mode == "ai-assisted"
+    assert config.log_level == "DEBUG"
+
+
+def test_load_config_missing_file():
+    config = load_config(Path("/nonexistent/config.toml"))
+    assert config.mode == "manual"  # defaults
+
+
+def test_load_config_partial_toml(tmp_path):
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text('mode = "ai-assisted"\n')
+    config = load_config(toml_file)
+    assert config.mode == "ai-assisted"
+    assert config.typing.wpm_code == 62.0  # unchanged default

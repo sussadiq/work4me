@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -101,3 +104,37 @@ class Config:
     def log_dir(self) -> Path:
         base = os.environ.get("HOME", "/tmp")
         return Path(base) / ".local" / "share" / "work4me" / "logs"
+
+
+def load_config(path: Path | None = None) -> Config:
+    """Load config from TOML file, falling back to defaults."""
+    import tomllib
+
+    if path is None:
+        path = Path.home() / ".config" / "work4me" / "config.toml"
+
+    config = Config()
+    if not path.exists():
+        return config
+
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except Exception:
+        logger.warning("Failed to parse config at %s, using defaults", path)
+        return config
+
+    _apply_toml(config, data)
+    return config
+
+
+def _apply_toml(config: Config, data: dict) -> None:
+    """Apply TOML dict onto Config dataclass (one level of nesting)."""
+    for key, value in data.items():
+        if isinstance(value, dict) and hasattr(config, key):
+            sub = getattr(config, key)
+            for sk, sv in value.items():
+                if hasattr(sub, sk):
+                    setattr(sub, sk, sv)
+        elif hasattr(config, key):
+            setattr(config, key, value)
