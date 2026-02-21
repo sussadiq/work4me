@@ -52,3 +52,23 @@ def test_speed_multiplier_clamps():
     for _ in range(40):
         engine.apply_adjustment(BehaviorAdjustment.SPEED_UP)
     assert engine.speed_multiplier >= 0.5
+
+
+def test_apply_speed_default():
+    config = Config()
+    engine = BehaviorEngine(config)
+    assert engine._apply_speed(1.0) == pytest.approx(1.0, abs=0.001)
+
+
+def test_apply_speed_slow():
+    config = Config()
+    engine = BehaviorEngine(config)
+    engine.speed_multiplier = 2.0
+    assert engine._apply_speed(1.0) == pytest.approx(2.0, abs=0.001)
+
+
+def test_apply_speed_fast():
+    config = Config()
+    engine = BehaviorEngine(config)
+    engine.speed_multiplier = 0.5
+    assert engine._apply_speed(1.0) == pytest.approx(0.5, abs=0.001)

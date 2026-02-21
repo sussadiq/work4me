@@ -32,6 +32,10 @@ class BehaviorEngine:
     def set_activity_monitor(self, monitor: ActivityMonitor) -> None:
         self._activity_monitor = monitor
 
+    def _apply_speed(self, delay: float) -> float:
+        """Scale a delay by the current speed_multiplier."""
+        return delay * self.speed_multiplier
+
     def apply_adjustment(self, adjustment: BehaviorAdjustment) -> None:
         if adjustment == BehaviorAdjustment.SLOW_DOWN:
             self.speed_multiplier = min(3.0, self.speed_multiplier * 1.3)
@@ -62,7 +66,7 @@ class BehaviorEngine:
         for typed_char in sequence:
             # Wait the computed delay
             if typed_char.delay_before > 0:
-                await asyncio.sleep(typed_char.delay_before)
+                await asyncio.sleep(self._apply_speed(typed_char.delay_before))
 
             if typed_char.is_error and send_backspace_fn is not None:
                 # Type wrong character
@@ -71,14 +75,14 @@ class BehaviorEngine:
                 self._record_event("keyboard")
 
                 # Brief pause (noticing the error)
-                await asyncio.sleep(random.uniform(0.2, 0.6))
+                await asyncio.sleep(self._apply_speed(random.uniform(0.2, 0.6)))
 
                 # Backspace
                 await send_backspace_fn()
                 self._record_event("keyboard")
 
                 # Brief pause before correction
-                await asyncio.sleep(random.uniform(0.05, 0.15))
+                await asyncio.sleep(self._apply_speed(random.uniform(0.05, 0.15)))
 
             # Type the correct character
             await send_char_fn(typed_char.char)
@@ -100,12 +104,12 @@ class BehaviorEngine:
             # Slight pause at spaces (between arguments)
             if char == " ":
                 delay += random.uniform(0.05, 0.15)
-            await asyncio.sleep(delay)
+            await asyncio.sleep(self._apply_speed(delay))
             await send_char_fn(char)
             self._record_event("keyboard")
 
         # Brief pause before pressing Enter (reviewing command)
-        await asyncio.sleep(random.uniform(0.3, 1.0))
+        await asyncio.sleep(self._apply_speed(random.uniform(0.3, 1.0)))
         await send_enter_fn()
         self._record_event("keyboard")
 
@@ -126,7 +130,7 @@ class BehaviorEngine:
 
         while elapsed < duration_seconds:
             wait = min(interval, duration_seconds - elapsed)
-            await asyncio.sleep(wait)
+            await asyncio.sleep(self._apply_speed(wait))
             elapsed += wait
 
             if elapsed < duration_seconds:
@@ -159,7 +163,7 @@ class BehaviorEngine:
 
     async def pause_natural(self, min_sec: float = 0.5, max_sec: float = 3.0) -> None:
         """Insert a natural pause between actions."""
-        await asyncio.sleep(random.uniform(min_sec, max_sec))
+        await asyncio.sleep(self._apply_speed(random.uniform(min_sec, max_sec)))
 
     def _record_event(self, kind: str) -> None:
         """Record an activity event for the activity monitor."""
