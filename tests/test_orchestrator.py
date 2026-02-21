@@ -2,8 +2,9 @@
 """Tests for the revised dual-mode orchestrator."""
 
 import asyncio
+import shlex
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, call
 from work4me.core.orchestrator import Orchestrator
 from work4me.config import Config
 from work4me.planning.task_planner import Activity, ActivityKind, TaskPlan
@@ -201,3 +202,84 @@ async def test_run_resumes_from_recovery():
     await orch.run("test task", 60, "/tmp")
     assert orch.snapshot.task_description == "Recovered task"
     assert orch.snapshot.current_activity_index == 2
+
+
+@pytest.mark.asyncio
+async def test_ai_assisted_prompt_is_shell_escaped(orchestrator):
+    """Shell metacharacters in prompt must be escaped."""
+    activity = Activity(
+        ActivityKind.CODING, "Write auth", 20,
+        ["src/auth.ts"], [], [], [],
+    )
+    orchestrator._mode = "ai-assisted"
+    orchestrator._vscode = AsyncMock()
+    orchestrator._behavior = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    prompt_with_injection = "'; rm -rf / #"
+    orchestrator._build_activity_prompt = MagicMock(return_value=prompt_with_injection)
+
+    await orchestrator._execute_coding_ai_assisted(activity, working_dir="/tmp")
+
+    # Find the call to run_terminal_command that has the claude command
+    for c in orchestrator._vscode.run_terminal_command.call_args_list:
+        cmd_arg = c[0][0]
+        if "claude" in cmd_arg:
+            # Must contain the shlex-quoted version (safely escaped)
+            assert shlex.quote(prompt_with_injection[:200]) in cmd_arg
+            # Must NOT use bare double-quote wrapping (the old vulnerable pattern)
+            assert f'"{prompt_with_injection[:200]}"' not in cmd_arg
+            break
+    else:
+        pytest.fail("run_terminal_command was not called with a claude command")
+
+
+@pytest.mark.asyncio
+async def test_wrap_up_commit_msg_is_shell_escaped(orchestrator):
+    """Shell metacharacters in commit message must be escaped."""
+    orchestrator._vscode = AsyncMock()
+
+    orchestrator.snapshot.task_description = 'foo"; echo pwned; "'
+
+    await orchestrator._wrap_up("/tmp")
+
+    # Find the git commit call
+    for c in orchestrator._vscode.run_terminal_command.call_args_list:
+        cmd_arg = c[0][0]
+        if "git commit" in cmd_arg:
+            # Must NOT contain unescaped double quotes from injection
+            assert 'echo pwned' not in cmd_arg or "'" in cmd_arg
+            # Must use shlex.quote
+            commit_msg = f"feat: {orchestrator.snapshot.task_description[:50]}"
+            assert shlex.quote(commit_msg) in cmd_arg
+            break
+    else:
+        pytest.fail("run_terminal_command was not called with git commit")
+
+
+@pytest.mark.asyncio
+async def test_replay_action_rejects_path_traversal(orchestrator):
+    """Path traversal in file_path must be blocked."""
+    from work4me.controllers.claude_code import CapturedAction, ActionKind as AK
+
+    orchestrator._vscode = AsyncMock()
+    orchestrator._behavior = AsyncMock()
+    orchestrator.snapshot.working_dir = "/tmp/project"
+
+    action = CapturedAction(kind=AK.EDIT, file_path="../../../etc/passwd", new_string="hacked")
+    await orchestrator._replay_action_in_vscode(action)
+    orchestrator._vscode.open_file.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_replay_action_allows_valid_path(orchestrator):
+    """Valid file paths within working_dir should be opened."""
+    from work4me.controllers.claude_code import CapturedAction, ActionKind as AK
+
+    orchestrator._vscode = AsyncMock()
+    orchestrator._behavior = AsyncMock()
+    orchestrator.snapshot.working_dir = "/tmp/project"
+
+    action = CapturedAction(kind=AK.EDIT, file_path="src/auth.py", new_string="code")
+    await orchestrator._replay_action_in_vscode(action)
+    orchestrator._vscode.open_file.assert_called_once()

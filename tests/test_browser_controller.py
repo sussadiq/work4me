@@ -1,6 +1,7 @@
 # tests/test_browser_controller.py
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from urllib.parse import quote_plus
 from work4me.controllers.browser import BrowserController
 from work4me.config import BrowserConfig
 
@@ -59,3 +60,13 @@ async def test_restart_relaunches(controller):
         await controller.restart()
         mock_cleanup.assert_called_once()
         mock_launch.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_search_url_encodes_special_chars(controller):
+    """Special characters in search query must be URL-encoded."""
+    controller._page = AsyncMock()
+    controller.navigate = AsyncMock()
+    await controller.search("C++ & generics")
+    url_arg = controller.navigate.call_args[0][0]
+    assert quote_plus("C++ & generics") in url_arg

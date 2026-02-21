@@ -4,6 +4,7 @@ import asyncio
 import logging
 import random
 from typing import Any, Optional
+from urllib.parse import quote_plus
 
 from work4me.config import BrowserConfig
 
@@ -71,15 +72,15 @@ class BrowserController:
         """Perform a web search."""
         if engine == "google":
             await self.navigate(
-                f"https://www.google.com/search?q={query.replace(' ', '+')}"
+                f"https://www.google.com/search?q={quote_plus(query)}"
             )
         elif engine == "stackoverflow":
             await self.navigate(
-                f"https://stackoverflow.com/search?q={query.replace(' ', '+')}"
+                f"https://stackoverflow.com/search?q={quote_plus(query)}"
             )
         else:
             await self.navigate(
-                f"https://www.google.com/search?q={query.replace(' ', '+')}"
+                f"https://www.google.com/search?q={quote_plus(query)}"
             )
 
     async def type_in_search(

@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from work4me.behavior.activity_monitor import ActivityMonitor, BehaviorAdjustment
 from work4me.behavior.engine import BehaviorEngine
@@ -317,10 +319,19 @@ class Orchestrator:
             await self._replay_action_in_vscode(action)
             await self._behavior.pause_natural(1.0, 4.0)
 
+    def _validate_file_path(self, file_path: str) -> str | None:
+        """Validate file_path stays within working_dir. Returns resolved path or None."""
+        working = Path(self.snapshot.working_dir).resolve()
+        resolved = (working / file_path).resolve()
+        if not str(resolved).startswith(str(working)):
+            logger.warning("Path traversal blocked: %s", file_path)
+            return None
+        return str(resolved)
+
     async def _replay_action_in_vscode(self, action) -> None:
         """Replay a Claude Code action visibly in VS Code."""
         if action.kind == ActionKind.EDIT or action.kind == ActionKind.WRITE:
-            file_path = action.file_path
+            file_path = self._validate_file_path(action.file_path) if action.file_path else None
             if file_path:
                 await self._vscode.open_file(file_path)
                 await asyncio.sleep(1.0)
@@ -357,7 +368,7 @@ class Orchestrator:
         await asyncio.sleep(0.5)
 
         # Type "claude" command to invoke Claude Code visibly
-        claude_cmd = f"claude -p \"{prompt[:200]}\""
+        claude_cmd = f"claude -p {shlex.quote(prompt[:200])}"
         await self._vscode.run_terminal_command(claude_cmd)
 
         # Wait for Claude to work (estimated time for the activity)
@@ -445,7 +456,7 @@ class Orchestrator:
         await asyncio.sleep(1.0)
 
         commit_msg = f"feat: {self.snapshot.task_description[:50]}"
-        await self._vscode.run_terminal_command(f'git commit -m "{commit_msg}"')
+        await self._vscode.run_terminal_command(f"git commit -m {shlex.quote(commit_msg)}")
         await asyncio.sleep(2.0)
 
         logger.info("Wrap-up complete")
