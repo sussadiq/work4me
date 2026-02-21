@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 _EXT_UUID = "work4me-focus@work4me"
 _EXT_INSTALL_DIR = Path.home() / ".local/share/gnome-shell/extensions" / _EXT_UUID
 _EXT_BUNDLE_DIR = Path(__file__).parent / "desktop" / "gnome-ext"
+_VSCODE_EXT_DIR = Path(__file__).parent.parent / "vscode-extension"
 
 
 @dataclass
@@ -59,12 +60,31 @@ class DoctorChecks:
         return CheckResult("Wayland", False, "not detected")
 
     def check_vscode_extension(self) -> CheckResult:
+        # Primary: use `code --list-extensions` (authoritative for vsix installs)
+        try:
+            result = subprocess.run(
+                ["code", "--list-extensions"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if "work4me" in line.lower():
+                        return CheckResult("VS Code Extension", True, line.strip())
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        # Fallback: scan ~/.vscode/extensions/ (symlink-based dev installs)
         ext_dir = Path.home() / ".vscode" / "extensions"
         if ext_dir.exists():
             for d in ext_dir.iterdir():
                 if "work4me" in d.name.lower():
                     return CheckResult("VS Code Extension", True, str(d))
-        return CheckResult("VS Code Extension", False, "not installed")
+
+        return CheckResult(
+            "VS Code Extension", False,
+            "not installed — run: cd vscode-extension && npm run vsix "
+            "&& code --install-extension work4me-bridge-0.1.0.vsix",
+        )
 
     def check_gnome_extension(self) -> CheckResult:
         """Check if the work4me-focus GNOME Shell extension is installed and active."""
@@ -138,6 +158,49 @@ class DoctorChecks:
             )
 
         return CheckResult("GNOME Extension Install", False, "install failed")
+
+    @staticmethod
+    def install_vscode_extension() -> CheckResult:
+        """Build and install the work4me-bridge VS Code extension.
+
+        Runs ``npm install``, ``npx vsce package``, and
+        ``code --install-extension`` from the bundled extension source.
+        """
+        if not _VSCODE_EXT_DIR.is_dir():
+            return CheckResult(
+                "VS Code Extension Install", False, "extension source not found",
+            )
+
+        try:
+            subprocess.run(
+                ["npm", "install"],
+                cwd=_VSCODE_EXT_DIR, capture_output=True, timeout=60,
+                check=True,
+            )
+            subprocess.run(
+                ["npx", "vsce", "package", "--no-dependencies"],
+                cwd=_VSCODE_EXT_DIR, capture_output=True, timeout=30,
+                check=True,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired,
+                subprocess.CalledProcessError) as exc:
+            return CheckResult(
+                "VS Code Extension Install", False, f"build failed: {exc}",
+            )
+
+        vsix = _VSCODE_EXT_DIR / "work4me-bridge-0.1.0.vsix"
+        try:
+            subprocess.run(
+                ["code", "--install-extension", str(vsix)],
+                capture_output=True, timeout=30, check=True,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired,
+                subprocess.CalledProcessError) as exc:
+            return CheckResult(
+                "VS Code Extension Install", False, f"install failed: {exc}",
+            )
+
+        return CheckResult("VS Code Extension Install", True, str(vsix))
 
     def check_playwright_firefox(self) -> CheckResult:
         """Check if Playwright Firefox browser binaries are installed."""
