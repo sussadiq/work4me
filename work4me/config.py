@@ -74,7 +74,7 @@ class VSCodeConfig:
 
 @dataclass
 class BrowserConfig:
-    chromium_path: str = "chromium"
+    chromium_path: str = "google-chrome"
     debug_port: int = 9222
     enabled: bool = True
     ozone_platform: str = "wayland"

@@ -17,7 +17,7 @@ def test_vscode_config_defaults():
 
 def test_browser_config_defaults():
     config = BrowserConfig()
-    assert config.chromium_path == "chromium"
+    assert config.chromium_path == "google-chrome"
     assert config.debug_port == 9222
     assert config.enabled is True
 

@@ -188,7 +188,7 @@ async def test_run_resumes_from_recovery():
     # Provide a resumable snapshot
     snap = StateSnapshot()
     snap.state = State.WORKING.value
-    snap.task_description = "Recovered task"
+    snap.task_description = "test task"  # Must match the task being started
     snap.current_activity_index = 2
     orch.check_for_recovery = lambda: snap
 
@@ -201,7 +201,7 @@ async def test_run_resumes_from_recovery():
     orch._persist_state = MagicMock()
 
     await orch.run("test task", 60, "/tmp")
-    assert orch.snapshot.task_description == "Recovered task"
+    assert orch.snapshot.task_description == "test task"
     assert orch.snapshot.current_activity_index == 2
 
 

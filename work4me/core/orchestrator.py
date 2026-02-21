@@ -104,15 +104,19 @@ class Orchestrator:
             await self._initialize(working_dir)
             await self._start_watchdog()
 
-            # Check for crash recovery
+            # Check for crash recovery — only if same task
             recovered = self.check_for_recovery()
-            if recovered:
+            if recovered and recovered.task_description == task_description:
                 logger.info(
                     "Recovering previous session at activity %d: %s",
                     recovered.current_activity_index,
                     recovered.task_description[:60],
                 )
                 self.snapshot = recovered
+            else:
+                recovered = None
+                # Clear stale state from a different task
+                self._clear_stale_state()
 
             # PLANNING
             self._transition("setup_complete")
@@ -248,7 +252,14 @@ class Orchestrator:
                 )
             )
 
-            await self._execute_activity_with_retry(activity, working_dir)
+            try:
+                await self._execute_activity_with_retry(activity, working_dir)
+            except Exception as exc:
+                logger.error(
+                    "Activity %d failed after retries, skipping: %s",
+                    i, exc,
+                )
+                self.snapshot.skipped_activities.append(i)
 
             # Persist state after each activity
             self.snapshot.current_activity_index = i + 1
@@ -330,10 +341,14 @@ class Orchestrator:
             await self._replay_action_in_vscode(action)
             await self._behavior.pause_natural(1.0, 4.0)
 
-    def _validate_file_path(self, file_path: str) -> str | None:
-        """Validate file_path stays within working_dir. Returns resolved path or None."""
+    def _resolve_activity_path(self, file_path: str) -> str | None:
+        """Resolve a relative file path against working_dir, blocking traversal."""
         working = Path(self.snapshot.working_dir).resolve()
-        resolved = (working / file_path).resolve()
+        # Handle already-absolute paths
+        if Path(file_path).is_absolute():
+            resolved = Path(file_path).resolve()
+        else:
+            resolved = (working / file_path).resolve()
         if not str(resolved).startswith(str(working)):
             logger.warning("Path traversal blocked: %s", file_path)
             return None
@@ -342,7 +357,7 @@ class Orchestrator:
     async def _replay_action_in_vscode(self, action) -> None:
         """Replay a Claude Code action visibly in VS Code."""
         if action.kind == ActionKind.EDIT or action.kind == ActionKind.WRITE:
-            file_path = self._validate_file_path(action.file_path) if action.file_path else None
+            file_path = self._resolve_activity_path(action.file_path) if action.file_path else None
             if file_path:
                 await self._vscode.open_file(file_path)
                 await asyncio.sleep(1.0)
@@ -392,8 +407,15 @@ class Orchestrator:
 
         # Open files that were involved
         for file_path in activity.files_involved[:3]:
-            await self._vscode.open_file(file_path)
-            await asyncio.sleep(2.0)
+            resolved = self._resolve_activity_path(file_path)
+            if resolved is None or not Path(resolved).exists():
+                logger.debug("Skipping non-existent file: %s", file_path)
+                continue
+            try:
+                await self._vscode.open_file(resolved)
+                await asyncio.sleep(2.0)
+            except Exception as exc:
+                logger.warning("Failed to open file %s: %s", resolved, exc)
 
     # ------------------------------------------------------------------
     # Browser activity
@@ -401,15 +423,24 @@ class Orchestrator:
 
     async def _execute_browser(self, activity: Activity) -> None:
         """Browse URLs from activity search queries."""
+        if not await self._browser_ctrl.health_check():
+            logger.warning("Browser not available, skipping browser activity: %s", activity.description[:60])
+            # Fall back to a thinking pause instead
+            await self._behavior.idle_think(activity.estimated_minutes * 60 * 0.5)
+            return
+
         for query in activity.search_queries:
-            await self._browser_ctrl.search(query)
-            await asyncio.sleep(2.0)
+            try:
+                await self._browser_ctrl.search(query)
+                await asyncio.sleep(2.0)
 
-            # Scroll and read
-            await self._browser_ctrl.scroll_down(pixels=400)
-            await asyncio.sleep(3.0)
+                # Scroll and read
+                await self._browser_ctrl.scroll_down(pixels=400)
+                await asyncio.sleep(3.0)
 
-            self._activity_monitor.record_event("mouse")
+                self._activity_monitor.record_event("mouse")
+            except Exception as exc:
+                logger.warning("Browser action failed, skipping: %s", exc)
 
     # ------------------------------------------------------------------
     # Terminal activity
@@ -417,15 +448,21 @@ class Orchestrator:
 
     async def _execute_terminal(self, activity: Activity, working_dir: str) -> None:
         """Run commands in VS Code integrated terminal."""
-        await self._vscode.show_terminal()
+        try:
+            await self._vscode.show_terminal()
+        except Exception as exc:
+            logger.warning("Cannot show terminal: %s", exc)
+            return
         await asyncio.sleep(0.5)
 
         for command in activity.commands:
-            await self._vscode.run_terminal_command(command)
-            wait_time = self._estimate_command_wait(command)
-            await asyncio.sleep(wait_time)
-
-            self._activity_monitor.record_event("keyboard")
+            try:
+                await self._vscode.run_terminal_command(command)
+                wait_time = self._estimate_command_wait(command)
+                await asyncio.sleep(wait_time)
+                self._activity_monitor.record_event("keyboard")
+            except Exception as exc:
+                logger.warning("Terminal command failed (%s): %s", command[:40], exc)
 
     # ------------------------------------------------------------------
     # Reading activity
@@ -436,11 +473,20 @@ class Orchestrator:
         await self._vscode.focus_editor()
 
         for file_path in activity.files_involved[:5]:
-            await self._vscode.open_file(file_path)
-            await asyncio.sleep(2.0)
-            await self._behavior.idle_think(10.0)
-
-            self._activity_monitor.record_event("keyboard")
+            resolved = self._resolve_activity_path(file_path)
+            if resolved is None:
+                logger.warning("Skipping unresolvable path: %s", file_path)
+                continue
+            if not Path(resolved).exists():
+                logger.warning("Skipping non-existent file: %s", resolved)
+                continue
+            try:
+                await self._vscode.open_file(resolved)
+                await asyncio.sleep(2.0)
+                await self._behavior.idle_think(10.0)
+                self._activity_monitor.record_event("keyboard")
+            except Exception as exc:
+                logger.warning("Failed to open file %s: %s", resolved, exc)
 
     # ------------------------------------------------------------------
     # Break and wrap-up
@@ -454,21 +500,24 @@ class Orchestrator:
         """Git commit and final cleanup."""
         logger.info("Wrapping up session...")
 
-        await self._vscode.show_terminal()
-        await asyncio.sleep(0.5)
+        try:
+            await self._vscode.show_terminal()
+            await asyncio.sleep(0.5)
 
-        await self._vscode.run_terminal_command("git status")
-        await asyncio.sleep(2.0)
+            await self._vscode.run_terminal_command("git status")
+            await asyncio.sleep(2.0)
 
-        await self._vscode.run_terminal_command("git add -u")
-        await asyncio.sleep(1.0)
+            await self._vscode.run_terminal_command("git add -u")
+            await asyncio.sleep(1.0)
 
-        await self._vscode.run_terminal_command("git add .")
-        await asyncio.sleep(1.0)
+            await self._vscode.run_terminal_command("git add .")
+            await asyncio.sleep(1.0)
 
-        commit_msg = f"feat: {self.snapshot.task_description[:50]}"
-        await self._vscode.run_terminal_command(f"git commit -m {shlex.quote(commit_msg)}")
-        await asyncio.sleep(2.0)
+            commit_msg = f"feat: {self.snapshot.task_description[:50]}"
+            await self._vscode.run_terminal_command(f"git commit -m {shlex.quote(commit_msg)}")
+            await asyncio.sleep(2.0)
+        except Exception as exc:
+            logger.warning("Wrap-up git commands failed: %s", exc)
 
         logger.info("Wrap-up complete")
 
@@ -547,8 +596,11 @@ class Orchestrator:
 
     async def _cleanup(self) -> None:
         """Close all connections."""
-        await self._vscode.cleanup()
-        await self._browser_ctrl.cleanup()
+        for name, ctrl in [("vscode", self._vscode), ("browser", self._browser_ctrl)]:
+            try:
+                await ctrl.cleanup()
+            except Exception:
+                logger.warning("Cleanup failed for %s", name, exc_info=True)
         logger.info("Cleanup done")
 
     def _transition(self, trigger: str) -> None:
@@ -589,6 +641,16 @@ class Orchestrator:
         except Exception:
             logger.warning("Failed to load recovery state", exc_info=True)
         return None
+
+    def _clear_stale_state(self) -> None:
+        """Remove stale state file from a previous session."""
+        state_path = self.config.runtime_dir / "state.json"
+        if state_path.exists():
+            try:
+                state_path.unlink()
+                logger.debug("Cleared stale state file")
+            except Exception:
+                logger.warning("Failed to clear stale state", exc_info=True)
 
     # ------------------------------------------------------------------
     # Helpers

@@ -3,6 +3,7 @@
 Planned for future Sway compositor target (see docs/05-compositor.md).
 Not currently imported by the main application — VS Code is used instead.
 
+Requires pynvim (not in pyproject.toml — install manually when activating this module).
 Provides programmatic control over Neovim via RPC socket for querying state,
 while visible typing goes through tmux send-keys (via BehaviorEngine).
 """

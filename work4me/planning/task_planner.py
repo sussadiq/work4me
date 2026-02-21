@@ -98,11 +98,41 @@ class TaskPlanner:
         """Parse Claude's JSON response into a TaskPlan."""
         text = raw_text.strip()
         start = text.find("[")
-        end = text.rfind("]") + 1
-        if start == -1 or end == 0:
+        if start == -1:
             raise ValueError(f"No JSON array found in Claude response: {text[:200]}")
 
-        data = json.loads(text[start:end])
+        # Find matching closing bracket by tracking depth
+        depth = 0
+        end = -1
+        in_string = False
+        escape_next = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\":
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+
+        if end == -1:
+            raise ValueError(f"Unmatched JSON array in Claude response: {text[:200]}")
+
+        json_str = text[start:end]
+        logger.debug("Extracted JSON (%d chars) from raw_text (%d chars)", len(json_str), len(text))
+        data = json.loads(json_str)
         activities = []
         for item in data:
             kind_str = item.get("kind", "CODING").upper()

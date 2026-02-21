@@ -24,23 +24,6 @@ class Schedule:
     total_budget_minutes: float
 
 
-# Session templates: (mean_duration, sigma, min, max)
-SESSION_TEMPLATES = [
-    (52, 5, 35, 75),
-    (45, 5, 30, 60),
-    (48, 5, 35, 65),
-    (38, 5, 25, 50),
-]
-
-# Break templates: (mean, sigma, min, max)
-BREAK_TEMPLATES = [
-    (6.5, 1.5, 3, 12),
-    (5.0, 1.5, 3, 8),
-    (12.0, 2.0, 8, 18),
-    (0, 0, 0, 0),  # no break after last session
-]
-
-
 class Scheduler:
     """Maps activities onto work sessions with breaks."""
 

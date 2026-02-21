@@ -206,20 +206,32 @@ class ClaudeCodeManager:
 
         if event_type == "assistant":
             content = event.get("message", {}).get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "")
+                        if text:
+                            texts.append(text)
+
         elif event_type == "result":
             session_id = event.get("session_id", "")
             if session_id:
                 self._last_session_id = session_id
-            content = event.get("content", [])
-        else:
-            return texts
 
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    text = block.get("text", "")
-                    if text:
-                        texts.append(text)
+            # Result events have text in "result" field (plain string)
+            result_text = event.get("result", "")
+            if isinstance(result_text, str) and result_text:
+                texts.append(result_text)
+
+            # Also check content array (some versions use this)
+            content = event.get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "")
+                        if text:
+                            texts.append(text)
+
         return texts
 
     def _extract_actions(self, event: dict) -> list[CapturedAction]:

@@ -26,7 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     start = sub.add_parser("start", help="Start a work session")
     start.add_argument("--task", "-t", required=True, help="Task description")
     start.add_argument(
-        "--hours", "-H", type=float, default=4.0, help="Time budget in hours (default: 4)"
+        "--hours", "-H", type=float, default=None, help="Time budget in hours (default: 4)"
+    )
+    start.add_argument(
+        "--budget", "-b", type=int, default=None, help="Time budget in minutes (alternative to --hours)"
     )
     start.add_argument(
         "--working-dir", "-d", type=str, default=".", help="Project directory"
@@ -85,13 +88,22 @@ async def cmd_start(args: argparse.Namespace) -> int:
     config.mode = args.mode
     config.claude.model = args.model
     config.claude.max_budget_usd = args.max_budget
-    config.default_hours = args.hours
+
+    # Resolve time budget: --budget (minutes) takes priority, then --hours, then default
+    if args.budget is not None:
+        time_budget_minutes = args.budget
+    elif args.hours is not None:
+        time_budget_minutes = int(args.hours * 60)
+    else:
+        time_budget_minutes = int(config.default_hours * 60)
+
+    config.default_hours = time_budget_minutes / 60.0
 
     orchestrator = Orchestrator(config)
     try:
         await orchestrator.run(
             task_description=args.task,
-            time_budget_minutes=int(args.hours * 60),
+            time_budget_minutes=time_budget_minutes,
             working_dir=config.working_dir,
         )
     except KeyboardInterrupt:

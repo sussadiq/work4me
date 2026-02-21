@@ -43,7 +43,7 @@ async def test_cmd_start_uses_load_config(tmp_path):
         with patch("work4me.cli.Orchestrator") as MockOrch:
             MockOrch.return_value.run = AsyncMock()
             args = argparse.Namespace(
-                task="test", hours=1.0, working_dir=".", model="sonnet",
+                task="test", hours=1.0, budget=None, working_dir=".", model="sonnet",
                 max_budget=5.0, mode="manual", verbose=False,
                 config=str(toml_file),
             )
@@ -59,7 +59,7 @@ async def test_cmd_start_no_config_flag(tmp_path):
         with patch("work4me.cli.Orchestrator") as MockOrch:
             MockOrch.return_value.run = AsyncMock()
             args = argparse.Namespace(
-                task="test", hours=1.0, working_dir=".", model="sonnet",
+                task="test", hours=1.0, budget=None, working_dir=".", model="sonnet",
                 max_budget=5.0, mode="manual", verbose=False,
                 config=None,
             )
