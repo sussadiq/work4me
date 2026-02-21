@@ -257,14 +257,32 @@ async function dispatch(cmd: Command): Promise<unknown> {
       return { pong: true, timestamp: Date.now() };
     }
 
-    // Claude Code sidebar commands
+    // Claude Code sidebar commands (anthropic.claude-code extension)
     case 'openClaudeCode': {
-      await vscode.commands.executeCommand('claude-dev.SidebarProvider.focus');
-      return { opened: 'claude-sidebar' };
+      const ext = vscode.extensions.getExtension('anthropic.claude-code');
+      if (!ext) {
+        throw new Error(
+          'Claude Code extension (anthropic.claude-code) is not installed'
+        );
+      }
+      if (!ext.isActive) {
+        log('Claude Code extension inactive, activating...');
+        await ext.activate();
+      }
+      if (!ext.isActive) {
+        throw new Error('Claude Code extension could not be activated');
+      }
+      log('Opening Claude Code sidebar...');
+      await vscode.commands.executeCommand('claude-vscode.sidebar.open');
+      return {
+        opened: 'claude-sidebar',
+        extensionActive: true,
+        extensionVersion: ext.packageJSON?.version ?? 'unknown',
+      };
     }
 
     case 'focusClaudeInput': {
-      await vscode.commands.executeCommand('claude-dev.SidebarProvider.focus');
+      await vscode.commands.executeCommand('claude-vscode.focus');
       return { focused: 'claude-input' };
     }
 
@@ -274,18 +292,23 @@ async function dispatch(cmd: Command): Promise<unknown> {
     }
 
     case 'newClaudeConversation': {
-      await vscode.commands.executeCommand('claude-dev.plusButtonClicked');
+      await vscode.commands.executeCommand('claude-vscode.newConversation');
       return { newConversation: true };
     }
 
     case 'acceptDiff': {
-      await vscode.commands.executeCommand('claude-dev.acceptDiff');
+      await vscode.commands.executeCommand('claude-vscode.acceptProposedDiff');
       return { accepted: true };
     }
 
     case 'rejectDiff': {
-      await vscode.commands.executeCommand('claude-dev.rejectDiff');
+      await vscode.commands.executeCommand('claude-vscode.rejectProposedDiff');
       return { rejected: true };
+    }
+
+    case 'checkClaudeExtension': {
+      const ext = vscode.extensions.getExtension('anthropic.claude-code');
+      return { installed: !!ext, active: ext?.isActive ?? false };
     }
 
     case 'startClaudeWatch': {

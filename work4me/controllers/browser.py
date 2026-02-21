@@ -52,6 +52,7 @@ class BrowserController:
         self._context = await self._playwright.firefox.launch_persistent_context(
             self._config.user_data_dir or "",
             headless=False,
+            no_viewport=True,
             timeout=self._config.launch_timeout,
             firefox_user_prefs={
                 "dom.webdriver.enabled": False,
@@ -108,7 +109,9 @@ class BrowserController:
         """Navigate to a URL."""
         if not self._page:
             raise RuntimeError("Browser not launched")
-        await self._page.goto(url, wait_until="domcontentloaded")
+        await self._page.goto(
+            url, wait_until="domcontentloaded", timeout=self._config.navigation_timeout,
+        )
         logger.debug("Navigated to %s", url)
 
     async def navigate_with_captcha_check(self, url: str) -> None:
@@ -122,13 +125,13 @@ class BrowserController:
         """Navigate back in browser history."""
         if not self._page:
             raise RuntimeError("Browser not launched")
-        await self._page.go_back()
+        await self._page.go_back(timeout=self._config.navigation_timeout)
 
     async def go_forward(self) -> None:
         """Navigate forward in browser history."""
         if not self._page:
             raise RuntimeError("Browser not launched")
-        await self._page.go_forward()
+        await self._page.go_forward(timeout=self._config.navigation_timeout)
 
     async def current_url(self) -> str:
         """Return the current page URL."""

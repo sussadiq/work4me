@@ -62,6 +62,42 @@ def test_check_vscode_extension_missing():
     assert "not installed" in result.detail
 
 
+# ------------------------------------------------------------------
+# Claude Code Extension checks
+# ------------------------------------------------------------------
+
+def test_check_claude_code_extension_found():
+    dc = DoctorChecks()
+    mock_result = MagicMock(
+        returncode=0,
+        stdout="some.ext\nanthropic.claude-code\nother.ext\n",
+    )
+    with patch("subprocess.run", return_value=mock_result):
+        result = dc.check_claude_code_extension()
+    assert result.passed
+    assert result.detail == "anthropic.claude-code"
+
+
+def test_check_claude_code_extension_missing():
+    dc = DoctorChecks()
+    mock_result = MagicMock(
+        returncode=0,
+        stdout="some.ext\nother.ext\n",
+    )
+    with patch("subprocess.run", return_value=mock_result):
+        result = dc.check_claude_code_extension()
+    assert not result.passed
+    assert "not installed" in result.detail
+
+
+def test_check_claude_code_extension_code_not_found():
+    dc = DoctorChecks()
+    with patch("subprocess.run", side_effect=FileNotFoundError):
+        result = dc.check_claude_code_extension()
+    assert not result.passed
+    assert "not installed" in result.detail
+
+
 def test_run_all_returns_list():
     dc = DoctorChecks()
     mock_cli = MagicMock(returncode=0, stdout="work4me.work4me-bridge\n")

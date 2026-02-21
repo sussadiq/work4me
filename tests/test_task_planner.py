@@ -128,3 +128,18 @@ async def test_decompose_raises_after_all_retries_exhausted(planner):
          patch("work4me.planning.task_planner.asyncio.sleep", new_callable=AsyncMock):
         with pytest.raises(RuntimeError, match="failed after 3 attempts"):
             await planner.decompose("Test task", time_budget_hours=1, working_dir="/tmp")
+
+
+def test_planner_uses_planning_model():
+    """TaskPlanner should create its ClaudeCodeManager with the planning_model."""
+    config = ClaudeConfig(model="opus", planning_model="haiku")
+    planner = TaskPlanner(config)
+    assert planner._claude.config.model == "haiku"
+
+
+def test_planner_uses_default_planning_model():
+    """TaskPlanner with default config should use haiku for planning."""
+    config = ClaudeConfig()
+    planner = TaskPlanner(config)
+    assert planner._claude.config.model == "haiku"
+    assert config.model == "sonnet"  # Original config unchanged

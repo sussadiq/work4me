@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 from dataclasses import dataclass, field
@@ -56,7 +57,7 @@ For each activity, specify:
 3. estimated_minutes: how long it should take
 4. files_involved: which files will be created/modified/read
 5. commands: any terminal commands to run
-6. search_queries: any web searches needed (for BROWSER activities)
+6. search_queries: short web search terms (3-6 words each, e.g. "python asyncio websocket tutorial") — only for BROWSER/THINKING activities that need web research. Leave empty for CODING/TERMINAL/READING activities.
 7. dependencies: indices (as strings) of activities that must complete first
 
 Return ONLY a JSON array. No explanation. The total estimated_minutes should equal approximately {target_minutes} (70% of budget — rest is breaks/transitions/thinking)."""
@@ -67,7 +68,8 @@ class TaskPlanner:
 
     def __init__(self, config: ClaudeConfig):
         self._config = config
-        self._claude = ClaudeCodeManager(config)
+        planning_config = dataclasses.replace(config, model=config.planning_model)
+        self._claude = ClaudeCodeManager(planning_config)
 
     async def decompose(
         self,

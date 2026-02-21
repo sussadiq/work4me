@@ -168,9 +168,13 @@ class VSCodeController:
     # Claude Code sidebar commands
     # ------------------------------------------------------------------
 
-    async def open_claude_sidebar(self) -> None:
+    async def open_claude_sidebar(self) -> dict[str, Any]:
         """Open the Claude Code sidebar in VS Code."""
-        await self.send_command("openClaudeCode")
+        return await self.send_command("openClaudeCode")
+
+    async def check_claude_extension(self) -> dict[str, Any]:
+        """Check if the Claude Code extension is installed and active."""
+        return await self.send_command("checkClaudeExtension")
 
     async def focus_claude_input(self) -> None:
         """Focus the Claude Code input box."""

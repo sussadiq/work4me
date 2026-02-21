@@ -144,9 +144,24 @@ async def test_connect_exponential_backoff(controller):
 
 @pytest.mark.asyncio
 async def test_open_claude_sidebar(controller):
-    controller.send_command = AsyncMock(return_value={"opened": "claude-sidebar"})
-    await controller.open_claude_sidebar()
+    controller.send_command = AsyncMock(return_value={
+        "opened": "claude-sidebar",
+        "extensionActive": True,
+        "extensionVersion": "2.1.49",
+    })
+    result = await controller.open_claude_sidebar()
     controller.send_command.assert_called_with("openClaudeCode")
+    assert result["opened"] == "claude-sidebar"
+    assert result["extensionVersion"] == "2.1.49"
+
+
+@pytest.mark.asyncio
+async def test_check_claude_extension(controller):
+    controller.send_command = AsyncMock(return_value={"installed": True, "active": True})
+    result = await controller.check_claude_extension()
+    controller.send_command.assert_called_with("checkClaudeExtension")
+    assert result["installed"] is True
+    assert result["active"] is True
 
 
 @pytest.mark.asyncio

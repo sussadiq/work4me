@@ -44,6 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode", type=str, choices=["sidebar", "manual"],
         default="sidebar", help="Operating mode (default: sidebar)"
     )
+    start.add_argument(
+        "--planning-model", type=str, default=None,
+        help="Model for task planning (default: haiku)",
+    )
     start.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
     start.add_argument(
         "--config", "-c", type=str, default=None,
@@ -87,6 +91,8 @@ async def cmd_start(args: argparse.Namespace) -> int:
     config.working_dir = str(Path(working_dir).resolve())
     config.mode = args.mode
     config.claude.model = args.model
+    if args.planning_model:
+        config.claude.planning_model = args.planning_model
     config.claude.max_budget_usd = args.max_budget
 
     # Resolve time budget: --budget (minutes) takes priority, then --hours, then default

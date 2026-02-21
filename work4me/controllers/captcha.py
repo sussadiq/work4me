@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import tempfile
@@ -131,10 +132,13 @@ class CaptchaSolver:
                 "Return ONLY valid JSON, no markdown."
             )
 
-            result = await self._claude.execute(
-                prompt=prompt,
-                working_dir="/tmp",
-                max_turns=1,
+            result = await asyncio.wait_for(
+                self._claude.execute(
+                    prompt=prompt,
+                    working_dir="/tmp",
+                    max_turns=3,
+                ),
+                timeout=60.0,
             )
 
             if result.error:
@@ -143,6 +147,9 @@ class CaptchaSolver:
 
             return self._parse_solution(result.raw_text)
 
+        except asyncio.TimeoutError:
+            logger.warning("Claude CAPTCHA analysis timed out (60s)")
+            return None
         except Exception:
             logger.warning("Claude CAPTCHA analysis failed", exc_info=True)
             return None

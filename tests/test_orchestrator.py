@@ -226,6 +226,10 @@ async def test_execute_coding_sidebar_mode():
         ["src/auth.ts"], [], [], [],
     )
     orch._vscode = AsyncMock()
+    orch._vscode.check_claude_extension = AsyncMock(return_value={"installed": True, "active": True})
+    orch._vscode.open_claude_sidebar = AsyncMock(return_value={
+        "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
+    })
     orch._vscode.is_claude_busy = AsyncMock(return_value=False)
     orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 3})
     orch._behavior = AsyncMock()
@@ -237,6 +241,7 @@ async def test_execute_coding_sidebar_mode():
 
     await orch._execute_coding_sidebar(activity, "/tmp")
 
+    orch._vscode.check_claude_extension.assert_called_once()
     orch._vscode.open_claude_sidebar.assert_called_once()
     orch._vscode.new_claude_conversation.assert_called_once()
     orch._vscode.focus_claude_input.assert_called_once()
@@ -254,6 +259,7 @@ async def test_sidebar_falls_back_to_manual_on_error():
         ["src/auth.ts"], [], [], [],
     )
     orch._vscode = AsyncMock()
+    orch._vscode.check_claude_extension = AsyncMock(return_value={"installed": True, "active": True})
     orch._vscode.open_claude_sidebar = AsyncMock(side_effect=RuntimeError("Extension not available"))
     orch._claude = AsyncMock()
     orch._claude.execute = AsyncMock(return_value=MagicMock(
@@ -268,6 +274,63 @@ async def test_sidebar_falls_back_to_manual_on_error():
     await orch._execute_coding_sidebar(activity, "/tmp")
     # Should have fallen back to manual — Claude headless should be called
     orch._claude.execute.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_sidebar_fallback_warning_mentions_extension(caplog):
+    """Fallback warning should mention 'anthropic.claude-code' for actionability."""
+    import logging
+    config = Config(mode="sidebar")
+    orch = Orchestrator(config)
+    activity = Activity(
+        ActivityKind.CODING, "Write auth", 20,
+        ["src/auth.ts"], [], [], [],
+    )
+    orch._vscode = AsyncMock()
+    orch._vscode.check_claude_extension = AsyncMock(return_value={"installed": True, "active": True})
+    orch._vscode.open_claude_sidebar = AsyncMock(side_effect=RuntimeError("boom"))
+    orch._claude = AsyncMock()
+    orch._claude.execute = AsyncMock(return_value=MagicMock(
+        actions=[], raw_text="done", exit_code=0, error=None
+    ))
+    orch._behavior = AsyncMock()
+    orch._window_mgr = AsyncMock()
+    orch._input_sim = AsyncMock()
+    orch._activity_monitor = MagicMock()
+    orch.snapshot.working_dir = "/tmp"
+
+    with caplog.at_level(logging.WARNING):
+        await orch._execute_coding_sidebar(activity, "/tmp")
+
+    assert any("anthropic.claude-code" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_sidebar_precheck_not_installed_falls_back():
+    """When checkClaudeExtension reports not installed, should fall back to manual."""
+    config = Config(mode="sidebar")
+    orch = Orchestrator(config)
+    activity = Activity(
+        ActivityKind.CODING, "Write auth", 20,
+        ["src/auth.ts"], [], [], [],
+    )
+    orch._vscode = AsyncMock()
+    orch._vscode.check_claude_extension = AsyncMock(return_value={"installed": False, "active": False})
+    orch._claude = AsyncMock()
+    orch._claude.execute = AsyncMock(return_value=MagicMock(
+        actions=[], raw_text="done", exit_code=0, error=None
+    ))
+    orch._behavior = AsyncMock()
+    orch._window_mgr = AsyncMock()
+    orch._input_sim = AsyncMock()
+    orch._activity_monitor = MagicMock()
+    orch.snapshot.working_dir = "/tmp"
+
+    await orch._execute_coding_sidebar(activity, "/tmp")
+    # Pre-check should have raised, triggering manual fallback
+    orch._claude.execute.assert_called_once()
+    # open_claude_sidebar should NOT have been called
+    orch._vscode.open_claude_sidebar.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -427,6 +490,10 @@ async def test_coding_sidebar_focuses_vscode_window(orchestrator):
     )
     orchestrator._mode = "sidebar"
     orchestrator._vscode = AsyncMock()
+    orchestrator._vscode.check_claude_extension = AsyncMock(return_value={"installed": True, "active": True})
+    orchestrator._vscode.open_claude_sidebar = AsyncMock(return_value={
+        "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
+    })
     orchestrator._vscode.is_claude_busy = AsyncMock(return_value=False)
     orchestrator._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
     orchestrator._behavior = AsyncMock()
@@ -623,6 +690,50 @@ async def test_execute_browser_clicks_results(orchestrator):
 
 
 @pytest.mark.asyncio
+async def test_thinking_without_queries_does_idle_think(orchestrator):
+    """THINKING with empty search_queries should idle think, not search."""
+    activity = Activity(
+        ActivityKind.THINKING, "Review the codebase structure and identify patterns", 5,
+        [], [], [], [],
+    )
+    orchestrator._browser_ctrl = AsyncMock()
+    orchestrator._browser_ctrl.health_check = AsyncMock(return_value=True)
+    orchestrator._behavior = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    await orchestrator._execute_thinking(activity)
+
+    # Browser search should NOT be called — no queries provided
+    orchestrator._browser_ctrl.search.assert_not_called()
+    # Should have done idle think instead
+    orchestrator._behavior.idle_think.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_thinking_with_queries_uses_browser(orchestrator):
+    """THINKING with search_queries should use the browser."""
+    activity = Activity(
+        ActivityKind.THINKING, "Research async patterns", 5,
+        [], [], ["python asyncio patterns"], [],
+    )
+    orchestrator._browser_ctrl = AsyncMock()
+    orchestrator._browser_ctrl.health_check = AsyncMock(return_value=True)
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    with patch("work4me.core.orchestrator.asyncio.sleep", new_callable=AsyncMock):
+        await orchestrator._execute_thinking(activity)
+
+    orchestrator._browser_ctrl.search.assert_called_once_with("python asyncio patterns")
+
+
+def test_generate_research_queries_removed(orchestrator):
+    """_generate_research_queries should no longer exist."""
+    assert not hasattr(orchestrator, "_generate_research_queries")
+
+
+@pytest.mark.asyncio
 async def test_research_with_browser_clicks_and_navigates_back(orchestrator):
     """_research_with_browser should click results and go back."""
     orchestrator._browser_ctrl = AsyncMock()
@@ -637,3 +748,59 @@ async def test_research_with_browser_clicks_and_navigates_back(orchestrator):
     orchestrator._browser_ctrl.handle_captcha.assert_called()
     orchestrator._browser_ctrl.click.assert_called()
     orchestrator._browser_ctrl.go_back.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_research_with_browser_skips_timed_out_query(orchestrator):
+    """_research_with_browser should skip queries that exceed time_per_query."""
+    orchestrator._browser_ctrl = AsyncMock()
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    # Make the helper hang indefinitely on the first query
+    call_count = 0
+
+    async def slow_then_fast(query):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            await asyncio.sleep(999)  # Will be cancelled by wait_for
+        # Second call completes instantly
+
+    orchestrator._research_single_query = AsyncMock(side_effect=slow_then_fast)
+
+    # 2 queries, 2 seconds total → 1 second per query
+    await orchestrator._research_with_browser(
+        ["slow query", "fast query"], total_seconds=2.0,
+    )
+
+    # Both queries should have been attempted
+    assert orchestrator._research_single_query.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_research_with_browser_continues_after_timeout(orchestrator):
+    """After a query times out, subsequent queries should still execute."""
+    orchestrator._browser_ctrl = AsyncMock()
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    executed_queries = []
+
+    async def track_query(query):
+        executed_queries.append(query)
+        if query == "slow":
+            await asyncio.sleep(999)
+
+    orchestrator._research_single_query = AsyncMock(side_effect=track_query)
+
+    await orchestrator._research_with_browser(
+        ["slow", "fast1", "fast2"], total_seconds=3.0,
+    )
+
+    # All three should be attempted, even though "slow" timed out
+    assert "slow" in executed_queries
+    assert "fast1" in executed_queries
+    assert "fast2" in executed_queries

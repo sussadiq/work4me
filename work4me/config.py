@@ -57,6 +57,7 @@ class MicroPauseConfig:
 class ClaudeConfig:
     cli_path: str = "claude"
     model: str = "sonnet"
+    planning_model: str = "haiku"  # Cheaper model for task decomposition
     max_turns: int = 15
     max_budget_usd: float = 0.0  # 0 = unlimited (Max plan)
     dangerously_skip_permissions: bool = True
@@ -105,6 +106,7 @@ class BrowserConfig:
     user_data_dir: str = ""
     window_class: str = "firefox"
     launch_timeout: float = 30000.0
+    navigation_timeout: float = 15000.0
     mouse: BrowserMouseConfig = field(default_factory=BrowserMouseConfig)
     captcha: CaptchaConfig = field(default_factory=CaptchaConfig)
 

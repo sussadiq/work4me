@@ -487,7 +487,10 @@ class Orchestrator:
             await self._execute_coding_sidebar_inner(activity, working_dir)
         except Exception as exc:
             logger.warning(
-                "Sidebar mode failed, falling back to manual: %s", exc,
+                "Sidebar mode failed, falling back to manual mode: %s "
+                "(ensure 'anthropic.claude-code' extension is installed in VS Code "
+                "and the work4me-bridge is running)",
+                exc,
             )
             await self._execute_coding_manual(activity, working_dir)
 
@@ -500,8 +503,18 @@ class Orchestrator:
         )
         prompt = self._build_activity_prompt(activity)
 
+        # Pre-validate Claude Code extension
+        ext_status = await self._vscode.check_claude_extension()
+        if not ext_status.get("installed"):
+            raise RuntimeError(
+                "Claude Code extension (anthropic.claude-code) is not installed in VS Code"
+            )
+        if not ext_status.get("active"):
+            logger.warning("Claude Code extension installed but not yet active")
+
         # 1. Open Claude Code sidebar and start a new conversation
-        await self._vscode.open_claude_sidebar()
+        result = await self._vscode.open_claude_sidebar()
+        logger.info("Claude sidebar opened (extension v%s)", result.get("extensionVersion", "?"))
         await asyncio.sleep(1.0)
         await self._vscode.new_claude_conversation()
         await asyncio.sleep(0.5)
@@ -696,12 +709,11 @@ class Orchestrator:
         """Think by researching in the browser — docs, Stack Overflow, etc."""
         total_seconds = activity.estimated_minutes * 60
 
-        # Try browser research first
-        if await self._browser_ctrl.health_check():
-            queries = activity.search_queries or self._generate_research_queries(activity)
-            if queries:
-                await self._research_with_browser(queries, total_seconds)
-                return
+        # Try browser research only if explicit search queries were provided
+        queries = activity.search_queries
+        if queries and await self._browser_ctrl.health_check():
+            await self._research_with_browser(queries, total_seconds)
+            return
 
         # Fallback: pure thinking with micro-movements
         logger.info("No browser available — thinking for %.0f seconds", total_seconds)
@@ -715,56 +727,55 @@ class Orchestrator:
         for query in queries:
             logger.info("Researching: %s", query)
             try:
-                await self._browser_ctrl.search(query)
-                await asyncio.sleep(2.0)
-                await self._browser_ctrl.dismiss_cookie_banner()
-                await self._browser_ctrl.handle_captcha()
-
-                # Click first 2-3 organic result links
-                result_links = ["h3", "a h3", "[data-header-feature] a"]
-                clicked = 0
-                for link_sel in result_links:
-                    if clicked >= 2:
-                        break
-                    try:
-                        await self._browser_ctrl.click(link_sel, timeout=2000)
-                        clicked += 1
-                        await asyncio.sleep(2.0)
-                        await self._browser_ctrl.dismiss_cookie_banner()
-
-                        # Read the page
-                        for _ in range(random.randint(2, 4)):
-                            await self._browser_ctrl.scroll_down(
-                                pixels=random.randint(200, 500)
-                            )
-                            await asyncio.sleep(random.uniform(3.0, 8.0))
-                            self._activity_monitor.record_event("mouse")
-
-                        await self._browser_ctrl.go_back()
-                        await asyncio.sleep(1.0)
-                    except Exception:
-                        continue
-
-                # Think pause between queries
-                think_pause = random.uniform(5.0, 15.0)
-                await asyncio.sleep(think_pause)
-                self._activity_monitor.record_event("keyboard")
-
+                await asyncio.wait_for(
+                    self._research_single_query(query),
+                    timeout=time_per_query,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Research query timed out after %.0fs, skipping: %s",
+                    time_per_query, query[:40],
+                )
             except Exception as exc:
                 logger.warning("Research query failed (%s): %s", query[:40], exc)
                 await self._behavior.idle_think(min(time_per_query, 30.0))
 
-    def _generate_research_queries(self, activity: Activity) -> list[str]:
-        """Generate search queries from activity description."""
-        desc = activity.description.lower()
-        queries: list[str] = []
-        # Use the description directly as a search query (trimmed)
-        if len(desc) > 10:
-            queries.append(activity.description[:80])
-        # Add a "best practices" query if it's about code
-        if any(w in desc for w in ("code", "implement", "fix", "refactor", "review")):
-            queries.append(f"{activity.description[:50]} best practices")
-        return queries[:3]
+    async def _research_single_query(self, query: str) -> None:
+        """Execute a single research query — search, click results, read, go back."""
+        await self._browser_ctrl.search(query)
+        await asyncio.sleep(2.0)
+        await self._browser_ctrl.dismiss_cookie_banner()
+        await self._browser_ctrl.handle_captcha()
+
+        # Click first 2-3 organic result links
+        result_links = ["h3", "a h3", "[data-header-feature] a"]
+        clicked = 0
+        for link_sel in result_links:
+            if clicked >= 2:
+                break
+            try:
+                await self._browser_ctrl.click(link_sel, timeout=2000)
+                clicked += 1
+                await asyncio.sleep(2.0)
+                await self._browser_ctrl.dismiss_cookie_banner()
+
+                # Read the page
+                for _ in range(random.randint(2, 4)):
+                    await self._browser_ctrl.scroll_down(
+                        pixels=random.randint(200, 500)
+                    )
+                    await asyncio.sleep(random.uniform(3.0, 8.0))
+                    self._activity_monitor.record_event("mouse")
+
+                await self._browser_ctrl.go_back()
+                await asyncio.sleep(1.0)
+            except Exception:
+                continue
+
+        # Think pause between queries
+        think_pause = random.uniform(5.0, 15.0)
+        await asyncio.sleep(think_pause)
+        self._activity_monitor.record_event("keyboard")
 
     # ------------------------------------------------------------------
     # Break and wrap-up

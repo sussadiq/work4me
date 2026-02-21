@@ -83,6 +83,21 @@ def test_load_config_partial_toml(tmp_path):
     assert config.typing.wpm_code == 62.0  # unchanged default
 
 
+def test_claude_config_planning_model_default():
+    config = ClaudeConfig()
+    assert config.planning_model == "haiku"
+
+
+def test_claude_config_planning_model_from_toml(tmp_path):
+    toml_file = tmp_path / "config.toml"
+    toml_file.write_text("""
+[claude]
+planning_model = "sonnet"
+""")
+    config = load_config(toml_file)
+    assert config.claude.planning_model == "sonnet"
+
+
 def test_claude_config_retry_defaults():
     config = ClaudeConfig()
     assert config.plan_max_retries == 3

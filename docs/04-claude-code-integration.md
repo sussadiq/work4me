@@ -243,6 +243,27 @@ if proc.returncode != 0:
 
 **Recommendation for Work4Me:** Use Claude Code CLI for software engineering tasks (already has all tools). Use API directly only for Computer Use GUI interaction or to minimize token costs on specific workflows.
 
+## Model Configuration
+
+Work4Me supports separate models for task planning and coding:
+
+- **`claude.model`** (default: `sonnet`) — used by the main `ClaudeCodeManager` for coding activities
+- **`claude.planning_model`** (default: `haiku`) — used by `TaskPlanner` for task decomposition
+
+This split saves costs since planning/decomposition doesn't need a powerful model. Configure via TOML:
+
+```toml
+[claude]
+model = "sonnet"           # For coding
+planning_model = "haiku"   # For task decomposition
+```
+
+Or via CLI flags:
+
+```bash
+work4me start --task "..." --model sonnet --planning-model haiku
+```
+
 ## Claude Code Prompt Templates
 
 ### Task Decomposition Prompt
@@ -291,7 +312,8 @@ The work4me-bridge VS Code extension exposes these commands via WebSocket:
 
 | Command | Action | Response |
 |---|---|---|
-| `openClaudeCode` | Open the Claude Code sidebar panel | `{opened}` |
+| `checkClaudeExtension` | Check if Claude Code extension is installed/active | `{installed, active}` |
+| `openClaudeCode` | Validate extension, activate if needed, open sidebar | `{opened, extensionActive, extensionVersion}` — throws if not installed or activation fails |
 | `focusClaudeInput` | Focus the Claude Code input box | `{focused}` |
 | `blurClaudeInput` | Remove focus from input box | `{blurred}` |
 | `newClaudeConversation` | Start a fresh conversation | `{newConversation}` |
@@ -304,16 +326,17 @@ The work4me-bridge VS Code extension exposes these commands via WebSocket:
 ### Sidebar Interaction Flow
 
 ```
-1. Open sidebar:        openClaudeCode
-2. New conversation:    newClaudeConversation
-3. Focus input:         focusClaudeInput
-4. Type prompt:         dotool keystrokes (human-like timing)
-5. Start monitoring:    startClaudeWatch
-6. Submit:              dotool "Return" key
-7. Wait for completion: poll getClaudeStatus until idleMs > 5000
-8. Stop monitoring:     stopClaudeWatch → log file changes
-9. Review diffs:        2-8s pause, then acceptDiff (95%) or rejectDiff (5%)
-10. Review files:       Open changed files in editor
+1. Pre-check:           checkClaudeExtension → fail fast if not installed
+2. Open sidebar:        openClaudeCode (validates + activates extension, then opens)
+3. New conversation:    newClaudeConversation
+4. Focus input:         focusClaudeInput
+5. Type prompt:         dotool keystrokes (human-like timing)
+6. Start monitoring:    startClaudeWatch
+7. Submit:              dotool "Return" key
+8. Wait for completion: poll getClaudeStatus until idleMs > 5000
+9. Stop monitoring:     stopClaudeWatch → log file changes
+10. Review diffs:       2-8s pause, then acceptDiff (95%) or rejectDiff (5%)
+11. Review files:       Open changed files in editor
 ```
 
 ### Completion Detection

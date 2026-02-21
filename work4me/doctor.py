@@ -202,6 +202,27 @@ class DoctorChecks:
 
         return CheckResult("VS Code Extension Install", True, str(vsix))
 
+    def check_claude_code_extension(self) -> CheckResult:
+        """Check if the official Anthropic Claude Code extension is installed."""
+        try:
+            result = subprocess.run(
+                ["code", "--list-extensions"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if line.strip().lower() == "anthropic.claude-code":
+                        return CheckResult(
+                            "Claude Code Extension", True, line.strip(),
+                        )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        return CheckResult(
+            "Claude Code Extension", False,
+            "not installed — install 'Claude Code' by Anthropic from the VS Code marketplace",
+        )
+
     def check_playwright_firefox(self) -> CheckResult:
         """Check if Playwright Firefox browser binaries are installed."""
         cache_dir = Path.home() / ".cache" / "ms-playwright"
@@ -221,6 +242,7 @@ class DoctorChecks:
         results.append(self.check_uinput())
         results.append(self.check_wayland())
         results.append(self.check_vscode_extension())
+        results.append(self.check_claude_code_extension())
         results.append(self.check_playwright_firefox())
         # Only check GNOME extension on GNOME desktops
         desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").upper()

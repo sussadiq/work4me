@@ -159,6 +159,8 @@ async def test_solve_screenshots_and_calls_claude(solver, mock_claude, captcha_i
     # Verify the prompt references a temp file path and the captcha kind
     call_kwargs = mock_claude.execute.call_args
     assert "recaptcha" in call_kwargs.kwargs.get("prompt", call_kwargs[1].get("prompt", ""))
+    # max_turns must be >= 3 so Claude can read the image and respond
+    assert call_kwargs.kwargs.get("max_turns", call_kwargs[1].get("max_turns")) == 3
     mock_mouse.click_at.assert_called_once()
     assert result is True
 
@@ -232,6 +234,22 @@ def test_parse_solution_returns_none_on_invalid(mock_claude):
     solver = CaptchaSolver(CaptchaConfig(), mock_claude)
     assert solver._parse_solution("no json here") is None
     assert solver._parse_solution("") is None
+
+
+@pytest.mark.asyncio
+async def test_ask_claude_returns_none_on_timeout(solver, mock_claude, captcha_info):
+    """_ask_claude should return None when Claude Code CLI times out."""
+    import asyncio
+
+    async def slow_execute(**kwargs):
+        await asyncio.sleep(999)
+
+    mock_claude.execute = slow_execute
+
+    # Patch the timeout to be very short so the test runs fast
+    with patch("work4me.controllers.captcha.asyncio.wait_for", side_effect=asyncio.TimeoutError):
+        result = await solver._ask_claude(b"fake-png", "recaptcha")
+    assert result is None
 
 
 def test_captcha_selectors_not_empty():

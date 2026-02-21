@@ -23,7 +23,9 @@ async def test_navigate_calls_goto(controller):
     mock_page = AsyncMock()
     controller._page = mock_page
     await controller.navigate("https://example.com")
-    mock_page.goto.assert_called_with("https://example.com", wait_until="domcontentloaded")
+    mock_page.goto.assert_called_with(
+        "https://example.com", wait_until="domcontentloaded", timeout=15000.0,
+    )
 
 @pytest.mark.asyncio
 async def test_search_types_query(controller):
@@ -111,7 +113,7 @@ async def test_launch_uses_persistent_context():
         await ctrl.launch()
 
     mock_pw_instance.firefox.launch_persistent_context.assert_called_once_with(
-        "", headless=False, timeout=30000.0,
+        "", headless=False, no_viewport=True, timeout=30000.0,
         firefox_user_prefs={"dom.webdriver.enabled": False},
     )
     assert ctrl._browser_available is True
@@ -455,16 +457,16 @@ async def test_current_url(ready_controller):
 
 @pytest.mark.asyncio
 async def test_go_back(ready_controller):
-    """go_back() should call page.go_back."""
+    """go_back() should call page.go_back with navigation timeout."""
     await ready_controller.go_back()
-    ready_controller._page.go_back.assert_called_once()
+    ready_controller._page.go_back.assert_called_once_with(timeout=15000.0)
 
 
 @pytest.mark.asyncio
 async def test_go_forward(ready_controller):
-    """go_forward() should call page.go_forward."""
+    """go_forward() should call page.go_forward with navigation timeout."""
     await ready_controller.go_forward()
-    ready_controller._page.go_forward.assert_called_once()
+    ready_controller._page.go_forward.assert_called_once_with(timeout=15000.0)
 
 
 @pytest.mark.asyncio
@@ -490,6 +492,18 @@ def test_cookie_selectors_not_empty():
     """COOKIE_SELECTORS should have common accept button patterns."""
     assert len(COOKIE_SELECTORS) >= 5
     assert any("Accept" in s for s in COOKIE_SELECTORS)
+
+
+@pytest.mark.asyncio
+async def test_navigate_uses_custom_navigation_timeout():
+    """navigate() should respect a custom navigation_timeout from config."""
+    config = BrowserConfig(navigation_timeout=5000.0)
+    ctrl = BrowserController(config)
+    ctrl._page = AsyncMock()
+    await ctrl.navigate("https://example.com")
+    ctrl._page.goto.assert_called_with(
+        "https://example.com", wait_until="domcontentloaded", timeout=5000.0,
+    )
 
 
 def test_controller_init_has_mouse_and_captcha_fields():
