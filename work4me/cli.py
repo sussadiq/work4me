@@ -91,48 +91,23 @@ async def cmd_start(args: argparse.Namespace) -> int:
 
 
 async def cmd_doctor(_args: argparse.Namespace) -> int:
-    import shutil
+    from work4me.doctor import DoctorChecks
 
-    checks = [
-        ("python3", "Python 3.11+"),
-        ("node", "Node.js 18+"),
-        ("claude", "Claude Code CLI"),
-        ("code", "VS Code"),
-        ("ydotool", "ydotool"),
-        ("wl-copy", "wl-clipboard"),
-    ]
-
+    dc = DoctorChecks()
+    results = dc.run_all()
     all_ok = True
-    print("Checking dependencies...\n")
-    for cmd, label in checks:
-        found = shutil.which(cmd)
-        if found:
-            print(f"  \u2713 {label} ({found})")
+    print("Checking system...\n")
+    for r in results:
+        if r.passed:
+            print(f"  \u2713 {r.name} ({r.detail})")
         else:
-            print(f"  \u2717 {label} — NOT FOUND")
+            print(f"  \u2717 {r.name} — {r.detail}")
             all_ok = False
-
-    # Check uinput access
-    print("\nChecking permissions...\n")
-    uinput = Path("/dev/uinput")
-    if uinput.exists() and uinput.stat().st_mode & 0o060:
-        print("  \u2713 /dev/uinput accessible")
-    else:
-        print("  \u2717 /dev/uinput — not accessible (run install.sh)")
-        all_ok = False
-
-    # Check Wayland
-    wayland = "WAYLAND_DISPLAY" in __import__("os").environ
-    if wayland:
-        print("  \u2713 Wayland session detected")
-    else:
-        print("  \u2717 Wayland session not detected")
-
     print()
     if all_ok:
         print("All checks passed!")
     else:
-        print("Some checks failed. See docs/11-distribution.md for setup instructions.")
+        print("Some checks failed. See docs/11-distribution.md for setup.")
     return 0 if all_ok else 1
 
 
