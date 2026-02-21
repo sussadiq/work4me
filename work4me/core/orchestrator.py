@@ -536,6 +536,23 @@ class Orchestrator:
             logger.warning("Failed to persist state", exc_info=True)
 
     # ------------------------------------------------------------------
+    # Crash recovery
+    # ------------------------------------------------------------------
+
+    def check_for_recovery(self) -> StateSnapshot | None:
+        """Check if there's a recoverable session state on disk."""
+        state_path = self.config.runtime_dir / "state.json"
+        if not state_path.exists():
+            return None
+        try:
+            snap = StateSnapshot.load(state_path)
+            if snap.is_resumable():
+                return snap
+        except Exception:
+            logger.warning("Failed to load recovery state", exc_info=True)
+        return None
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 

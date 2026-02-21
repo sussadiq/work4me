@@ -125,6 +125,11 @@ class StateSnapshot:
         self.claude_session_id: str = ""
         self.working_dir: str = ""
 
+    def is_resumable(self) -> bool:
+        """Check if this snapshot represents a session that can be resumed."""
+        resumable_states = {State.WORKING.value, State.PLANNING.value, State.ON_BREAK.value, State.PAUSED.value}
+        return self.state in resumable_states and bool(self.task_description)
+
     def save(self, path: Path) -> None:
         """Atomically save state to disk."""
         path.parent.mkdir(parents=True, exist_ok=True)
