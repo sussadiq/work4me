@@ -1,14 +1,18 @@
-"""CAPTCHA detection and solving via Claude vision API."""
+"""CAPTCHA detection and solving via Claude Code CLI."""
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
+import tempfile
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from work4me.config import CaptchaConfig
+
+if TYPE_CHECKING:
+    from work4me.controllers.claude_code import ClaudeCodeManager
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +70,11 @@ class CaptchaDetector:
 
 
 class CaptchaSolver:
-    """Solve CAPTCHAs by screenshotting and asking Claude vision."""
+    """Solve CAPTCHAs by screenshotting and asking Claude Code CLI."""
 
-    def __init__(self, config: CaptchaConfig) -> None:
+    def __init__(self, config: CaptchaConfig, claude: ClaudeCodeManager) -> None:
         self._config = config
-        self._client: Any = None  # lazy anthropic.AsyncAnthropic
+        self._claude = claude
 
     async def solve(
         self,
@@ -109,48 +113,69 @@ class CaptchaSolver:
     async def _ask_claude(
         self, screenshot: bytes, kind: str
     ) -> CaptchaSolution | None:
-        """Send screenshot to Claude API, get structured solution back."""
-        client = self._get_client()
-        if client is None:
-            return None
-
-        b64 = base64.b64encode(screenshot).decode("ascii")
-        prompt = (
-            f"This is a screenshot of a {kind} CAPTCHA on a web page. "
-            "Analyze it and return a JSON object with a 'steps' array. "
-            "Each step should have: 'action' (click/type/select), "
-            "and optionally 'x'/'y' (coordinates relative to the image), "
-            "'text' (for typing), or 'selector' (CSS selector). "
-            "Return ONLY valid JSON, no markdown."
-        )
-
+        """Save screenshot to temp file, ask Claude Code CLI to analyze it."""
+        tmp_path: str | None = None
         try:
-            response = await client.messages.create(
-                model=self._config.anthropic_model,
-                max_tokens=1024,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": b64,
-                                },
-                            },
-                            {"type": "text", "text": prompt},
-                        ],
-                    }
-                ],
+            with tempfile.NamedTemporaryFile(
+                suffix=".png", prefix="work4me-captcha-", delete=False
+            ) as tmp:
+                tmp.write(screenshot)
+                tmp_path = tmp.name
+
+            prompt = (
+                f"Read the image at {tmp_path} and analyze the {kind} CAPTCHA. "
+                "Return a JSON object with a 'steps' array. "
+                "Each step should have: 'action' (click/type/select), "
+                "and optionally 'x'/'y' (coordinates relative to the image), "
+                "'text' (for typing), or 'selector' (CSS selector). "
+                "Return ONLY valid JSON, no markdown."
             )
-            text = response.content[0].text
-            data = json.loads(text)
-            return CaptchaSolution(steps=data.get("steps", []))
+
+            result = await self._claude.execute(
+                prompt=prompt,
+                working_dir="/tmp",
+                max_turns=1,
+            )
+
+            if result.error:
+                logger.warning("Claude Code CAPTCHA call failed: %s", result.error[:200])
+                return None
+
+            return self._parse_solution(result.raw_text)
+
         except Exception:
-            logger.warning("Claude CAPTCHA API call failed", exc_info=True)
+            logger.warning("Claude CAPTCHA analysis failed", exc_info=True)
             return None
+        finally:
+            if tmp_path:
+                try:
+                    Path(tmp_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    def _parse_solution(self, raw_text: str) -> CaptchaSolution | None:
+        """Extract JSON solution from Claude's raw text response."""
+        # Find the first JSON object containing "steps"
+        start = raw_text.find("{")
+        if start == -1:
+            return None
+        # Find matching closing brace
+        depth = 0
+        for i in range(start, len(raw_text)):
+            if raw_text[i] == "{":
+                depth += 1
+            elif raw_text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        data = json.loads(raw_text[start : i + 1])
+                        steps = data.get("steps", [])
+                        if isinstance(steps, list):
+                            return CaptchaSolution(steps=steps)
+                    except json.JSONDecodeError:
+                        pass
+                    break
+        return None
 
     async def _execute_solution(
         self, page: Any, browser_mouse: Any, solution: CaptchaSolution
@@ -181,18 +206,3 @@ class CaptchaSolver:
                 )
                 return False
         return True
-
-    def _get_client(self) -> Any:
-        """Lazy-init the Anthropic async client."""
-        if self._client is not None:
-            return self._client
-        try:
-            import anthropic
-
-            self._client = anthropic.AsyncAnthropic()
-            return self._client
-        except ImportError:
-            logger.warning(
-                "anthropic package not installed — CAPTCHA solving disabled"
-            )
-            return None

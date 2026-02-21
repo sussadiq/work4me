@@ -95,7 +95,6 @@ class BrowserMouseConfig:
 @dataclass
 class CaptchaConfig:
     enabled: bool = True
-    anthropic_model: str = "claude-sonnet-4-20250514"
     max_attempts: int = 3
     screenshot_timeout: float = 5000.0
 

@@ -60,8 +60,8 @@ class Orchestrator:
 
         # Controllers
         self._vscode = VSCodeController(config.vscode)
-        self._browser_ctrl = BrowserController(config.browser)
         self._claude = ClaudeCodeManager(config.claude)
+        self._browser_ctrl = BrowserController(config.browser, claude=self._claude)
         self._behavior = BehaviorEngine(config)
 
         # Planning

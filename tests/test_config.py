@@ -145,7 +145,6 @@ def test_browser_mouse_config_defaults():
 def test_captcha_config_defaults():
     config = CaptchaConfig()
     assert config.enabled is True
-    assert "claude" in config.anthropic_model
     assert config.max_attempts == 3
     assert config.screenshot_timeout == 5000.0
 

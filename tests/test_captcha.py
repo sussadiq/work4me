@@ -122,8 +122,13 @@ async def test_detect_handles_exceptions(detector):
 
 
 @pytest.fixture
-def solver():
-    return CaptchaSolver(CaptchaConfig())
+def mock_claude():
+    return AsyncMock()
+
+
+@pytest.fixture
+def solver(mock_claude):
+    return CaptchaSolver(CaptchaConfig(), mock_claude)
 
 
 @pytest.fixture
@@ -136,77 +141,97 @@ def captcha_info():
 
 
 @pytest.mark.asyncio
-async def test_solve_screenshots_and_calls_claude(solver, captcha_info):
-    """solve should screenshot the CAPTCHA area, call Claude, and execute steps."""
+async def test_solve_screenshots_and_calls_claude(solver, mock_claude, captcha_info):
+    """solve should screenshot the CAPTCHA area, call Claude Code, and execute steps."""
     mock_page = AsyncMock()
     mock_page.screenshot = AsyncMock(return_value=b"fake-png-data")
-
     mock_mouse = AsyncMock()
 
-    mock_client = AsyncMock()
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock(text='{"steps": [{"action": "click", "x": 150, "y": 40}]}')]
-    mock_client.messages.create = AsyncMock(return_value=mock_response)
-
-    solver._client = mock_client
+    mock_result = MagicMock()
+    mock_result.error = ""
+    mock_result.raw_text = '{"steps": [{"action": "click", "x": 150, "y": 40}]}'
+    mock_claude.execute = AsyncMock(return_value=mock_result)
 
     result = await solver.solve(mock_page, mock_mouse, captcha_info)
 
     mock_page.screenshot.assert_called_once()
-    mock_client.messages.create.assert_called_once()
+    mock_claude.execute.assert_called_once()
+    # Verify the prompt references a temp file path and the captcha kind
+    call_kwargs = mock_claude.execute.call_args
+    assert "recaptcha" in call_kwargs.kwargs.get("prompt", call_kwargs[1].get("prompt", ""))
     mock_mouse.click_at.assert_called_once()
     assert result is True
 
 
 @pytest.mark.asyncio
-async def test_solve_returns_false_on_api_error(solver, captcha_info):
-    """solve should return False when the Claude API call fails."""
+async def test_solve_returns_false_on_api_error(solver, mock_claude, captcha_info):
+    """solve should return False when Claude Code CLI fails."""
     mock_page = AsyncMock()
     mock_page.screenshot = AsyncMock(return_value=b"fake-png-data")
     mock_mouse = AsyncMock()
 
-    mock_client = AsyncMock()
-    mock_client.messages.create = AsyncMock(side_effect=Exception("API error"))
-    solver._client = mock_client
+    mock_claude.execute = AsyncMock(side_effect=Exception("CLI error"))
 
     result = await solver.solve(mock_page, mock_mouse, captcha_info)
     assert result is False
 
 
 @pytest.mark.asyncio
-async def test_solve_disabled_returns_false(captcha_info):
+async def test_solve_returns_false_on_result_error(solver, mock_claude, captcha_info):
+    """solve should return False when Claude Code returns an error."""
+    mock_page = AsyncMock()
+    mock_page.screenshot = AsyncMock(return_value=b"fake-png-data")
+    mock_mouse = AsyncMock()
+
+    mock_result = MagicMock()
+    mock_result.error = "Some error occurred"
+    mock_result.raw_text = ""
+    mock_claude.execute = AsyncMock(return_value=mock_result)
+
+    result = await solver.solve(mock_page, mock_mouse, captcha_info)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_solve_disabled_returns_false(mock_claude, captcha_info):
     """solve should return False when CAPTCHA solving is disabled."""
-    solver = CaptchaSolver(CaptchaConfig(enabled=False))
+    solver = CaptchaSolver(CaptchaConfig(enabled=False), mock_claude)
     result = await solver.solve(AsyncMock(), AsyncMock(), captcha_info)
     assert result is False
 
 
 @pytest.mark.asyncio
-async def test_solve_handles_type_step(solver, captcha_info):
+async def test_solve_handles_type_step(solver, mock_claude, captcha_info):
     """solve should handle 'type' action steps."""
     mock_page = AsyncMock()
     mock_page.screenshot = AsyncMock(return_value=b"fake-png-data")
     mock_mouse = AsyncMock()
 
-    mock_client = AsyncMock()
-    mock_response = MagicMock()
-    mock_response.content = [
-        MagicMock(text='{"steps": [{"action": "type", "text": "abc123", "selector": "#input"}]}')
-    ]
-    mock_client.messages.create = AsyncMock(return_value=mock_response)
-    solver._client = mock_client
+    mock_result = MagicMock()
+    mock_result.error = ""
+    mock_result.raw_text = '{"steps": [{"action": "type", "text": "abc123", "selector": "#input"}]}'
+    mock_claude.execute = AsyncMock(return_value=mock_result)
 
     result = await solver.solve(mock_page, mock_mouse, captcha_info)
     assert result is True
     mock_page.type.assert_called_once_with("#input", "abc123", delay=85)
 
 
-def test_get_client_returns_none_without_anthropic(solver):
-    """_get_client should return None when anthropic is not installed."""
-    solver._client = None
-    with patch.dict("sys.modules", {"anthropic": None}):
-        client = solver._get_client()
-    assert client is None
+def test_parse_solution_extracts_json(mock_claude):
+    """_parse_solution should extract JSON from mixed text."""
+    solver = CaptchaSolver(CaptchaConfig(), mock_claude)
+    raw = 'Here is the solution: {"steps": [{"action": "click", "x": 10, "y": 20}]} done.'
+    solution = solver._parse_solution(raw)
+    assert solution is not None
+    assert len(solution.steps) == 1
+    assert solution.steps[0]["action"] == "click"
+
+
+def test_parse_solution_returns_none_on_invalid(mock_claude):
+    """_parse_solution should return None when no valid JSON found."""
+    solver = CaptchaSolver(CaptchaConfig(), mock_claude)
+    assert solver._parse_solution("no json here") is None
+    assert solver._parse_solution("") is None
 
 
 def test_captcha_selectors_not_empty():

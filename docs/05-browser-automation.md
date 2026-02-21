@@ -84,7 +84,7 @@ click_delay_max = 0.15      # Pre-click delay max
 
 ## CAPTCHA Detection and Solving
 
-CAPTCHAs are detected by checking known selectors, then solved via Claude vision API.
+CAPTCHAs are detected by checking known selectors, then solved via Claude Code CLI (already a core dependency — no extra packages needed).
 
 ### Detection Flow
 
@@ -103,20 +103,21 @@ CaptchaDetector.detect(page)
 ```
 CaptchaSolver.solve(page, browser_mouse, captcha)
     1. Screenshot the CAPTCHA region (page.screenshot with clip)
-    2. Base64-encode screenshot → Claude vision API
-    3. Claude returns JSON: {steps: [{action, x?, y?, text?, selector?}]}
-    4. Execute each step using BrowserMouse for human-like clicks
-    5. Retry up to max_attempts on failure
+    2. Save screenshot to a temp file (/tmp/work4me-captcha-XXXX.png)
+    3. Ask Claude Code CLI to read the image and return JSON steps
+    4. Parse JSON: {steps: [{action, x?, y?, text?, selector?}]}
+    5. Execute each step using BrowserMouse for human-like clicks
+    6. Clean up temp file
+    7. Retry up to max_attempts on failure
 ```
 
-The `anthropic` package is an optional dependency (`pip install work4me[captcha]`). CAPTCHA solving is disabled if not installed.
+The `CaptchaSolver` receives a `ClaudeCodeManager` instance (passed from the orchestrator via `BrowserController`). The model used is whatever is configured in `[claude].model`.
 
 ### Configuration
 
 ```toml
 [browser.captcha]
 enabled = true
-anthropic_model = "claude-sonnet-4-20250514"
 max_attempts = 3
 screenshot_timeout = 5000.0
 ```

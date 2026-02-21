@@ -28,8 +28,9 @@ COOKIE_SELECTORS = [
 class BrowserController:
     """Controls a visible Firefox browser via Playwright."""
 
-    def __init__(self, config: BrowserConfig) -> None:
+    def __init__(self, config: BrowserConfig, claude: Any = None) -> None:
         self._config = config
+        self._claude = claude  # ClaudeCodeManager for CAPTCHA solving
         self._context: Any = None
         self._page: Any = None
         self._browser_available: bool = False
@@ -88,7 +89,11 @@ class BrowserController:
 
         self._mouse = BrowserMouse(HumanMouse(), self._config.mouse)
         self._captcha_detector = CaptchaDetector()
-        self._captcha_solver = CaptchaSolver(self._config.captcha)
+        if self._claude is not None:
+            self._captcha_solver = CaptchaSolver(self._config.captcha, self._claude)
+        else:
+            logger.warning("No ClaudeCodeManager provided — CAPTCHA solving disabled")
+            self._captcha_solver = None
 
     async def _on_dialog(self, dialog: Any) -> None:
         """Handle JS alert/confirm/prompt dialogs."""
