@@ -91,6 +91,7 @@ Partially works for XWayland windows only. Window management completely broken. 
   - `org.gnome.Shell.Eval` D-Bus interface (restricted/disabled in modern GNOME)
   - AT-SPI accessibility APIs for reading UI state
   - GNOME 49 `xdg_toplevel_tag_v1` protocol + `gnome-service-client` for tagging windows
+- **Implemented:** `work4me/desktop/window_mgr.py` uses `gdbus call` to `org.gnome.Shell.Eval` with JS that finds windows by `wm_class` and calls `meta_window.activate()`. Caches availability to avoid log spam; degrades gracefully if Shell.Eval is restricted.
 
 ### Sway
 - `swaymsg` IPC — comprehensive control

@@ -35,6 +35,7 @@ from work4me.controllers.claude_code import ActionKind, CapturedAction, ClaudeCo
 from work4me.controllers.vscode import VSCodeController
 from work4me.core.events import EventBus, StateChanged, TaskProgress
 from work4me.core.state import State, StateMachine, StateSnapshot
+from work4me.desktop.window_mgr import detect_window_manager
 from work4me.planning.scheduler import Schedule, Scheduler, WorkSession
 from work4me.planning.task_planner import Activity, ActivityKind, TaskPlan, TaskPlanner
 
@@ -62,6 +63,9 @@ class Orchestrator:
         # Planning
         self._planner = TaskPlanner(config.claude)
         self._scheduler = Scheduler(config.session)
+
+        # Window management
+        self._window_mgr = detect_window_manager()
 
         # Activity monitor
         self._activity_monitor = ActivityMonitor(config.activity)
@@ -320,11 +324,22 @@ class Orchestrator:
         self._activity_monitor.record_event("keyboard")
 
     # ------------------------------------------------------------------
+    # Window focus
+    # ------------------------------------------------------------------
+
+    async def _focus_app_window(self, window_class: str) -> None:
+        """Raise the OS window for the given WM_CLASS."""
+        focused = await self._window_mgr.focus_window(window_class)
+        if focused:
+            await self._behavior.pause_natural(0.3, 0.8)
+
+    # ------------------------------------------------------------------
     # Mode A: Manual Developer
     # ------------------------------------------------------------------
 
     async def _execute_coding_manual(self, activity: Activity, working_dir: str) -> None:
         """Mode A: headless Claude Code → replay edits in VS Code."""
+        await self._focus_app_window(self.config.vscode.window_class)
         prompt = self._build_activity_prompt(activity)
 
         result = await self._claude.execute(
@@ -388,6 +403,7 @@ class Orchestrator:
 
     async def _execute_coding_ai_assisted(self, activity: Activity, working_dir: str) -> None:
         """Mode B: type prompts into visible Claude Code terminal session."""
+        await self._focus_app_window(self.config.vscode.window_class)
         prompt = self._build_activity_prompt(activity)
 
         # Type the prompt into the VS Code terminal (visible Claude Code session)
@@ -430,6 +446,8 @@ class Orchestrator:
             await self._behavior.idle_think(activity.estimated_minutes * 60 * 0.5)
             return
 
+        await self._focus_app_window(self.config.browser.window_class)
+
         for query in activity.search_queries:
             try:
                 await self._browser_ctrl.search(query)
@@ -449,6 +467,7 @@ class Orchestrator:
 
     async def _execute_terminal(self, activity: Activity, working_dir: str) -> None:
         """Run commands in VS Code integrated terminal."""
+        await self._focus_app_window(self.config.vscode.window_class)
         try:
             await self._vscode.show_terminal()
         except Exception as exc:
@@ -471,6 +490,7 @@ class Orchestrator:
 
     async def _execute_reading(self, activity: Activity) -> None:
         """Open and scroll through files in VS Code."""
+        await self._focus_app_window(self.config.vscode.window_class)
         await self._vscode.focus_editor()
 
         for file_path in activity.files_involved[:5]:

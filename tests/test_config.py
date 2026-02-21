@@ -13,6 +13,7 @@ def test_vscode_config_defaults():
     assert config.websocket_port == 9876
     assert config.launch_on_start is True
     assert config.executable == "code"
+    assert config.window_class == "code"
 
 
 def test_browser_config_defaults():
@@ -22,6 +23,7 @@ def test_browser_config_defaults():
     assert config.enabled is True
     assert config.user_data_dir == ""
     assert config.profile_directory == ""
+    assert config.window_class == "google-chrome"
 
 
 def test_claude_config_no_budget_cap():

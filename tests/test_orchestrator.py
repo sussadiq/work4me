@@ -58,6 +58,7 @@ async def test_execute_activity_coding_mode_a(orchestrator):
     ))
     orchestrator._vscode = AsyncMock()
     orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
     orchestrator._activity_monitor = MagicMock()
     orchestrator._activity_monitor.recommended_adjustment = MagicMock(
         return_value=MagicMock(value="none")
@@ -76,6 +77,7 @@ async def test_execute_activity_browser(orchestrator):
     )
     orchestrator._browser_ctrl = AsyncMock()
     orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
     orchestrator._activity_monitor = MagicMock()
     orchestrator._activity_monitor.recommended_adjustment = MagicMock(
         return_value=MagicMock(value="none")
@@ -215,6 +217,7 @@ async def test_ai_assisted_prompt_is_shell_escaped(orchestrator):
     orchestrator._mode = "ai-assisted"
     orchestrator._vscode = AsyncMock()
     orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
     orchestrator._activity_monitor = MagicMock()
 
     prompt_with_injection = "'; rm -rf / #"
@@ -347,3 +350,125 @@ async def test_retry_propagates_cancelled_error():
     activity = Activity(ActivityKind.CODING, "test", 5, [], [], [], [])
     with pytest.raises(asyncio.CancelledError):
         await orch._execute_activity_with_retry(activity, "/tmp", max_retries=3)
+
+
+# ------------------------------------------------------------------
+# Window focus integration
+# ------------------------------------------------------------------
+
+
+def test_orchestrator_has_window_manager(orchestrator):
+    from work4me.desktop.window_mgr import WindowManager
+    assert hasattr(orchestrator, "_window_mgr")
+
+
+@pytest.mark.asyncio
+async def test_coding_manual_focuses_vscode_window(orchestrator):
+    """_execute_coding_manual should focus the VS Code window."""
+    activity = Activity(
+        ActivityKind.CODING, "Write auth", 20,
+        ["src/auth.ts"], [], [], [],
+    )
+    orchestrator._mode = "manual"
+    orchestrator._claude = AsyncMock()
+    orchestrator._claude.execute = AsyncMock(return_value=MagicMock(
+        actions=[], raw_text="done", exit_code=0, error=None
+    ))
+    orchestrator._vscode = AsyncMock()
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    await orchestrator._execute_coding_manual(activity, "/tmp")
+    orchestrator._window_mgr.focus_window.assert_called_once_with("code")
+
+
+@pytest.mark.asyncio
+async def test_coding_ai_assisted_focuses_vscode_window(orchestrator):
+    """_execute_coding_ai_assisted should focus the VS Code window."""
+    activity = Activity(
+        ActivityKind.CODING, "Write auth", 20,
+        ["src/auth.ts"], [], [], [],
+    )
+    orchestrator._mode = "ai-assisted"
+    orchestrator._vscode = AsyncMock()
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    await orchestrator._execute_coding_ai_assisted(activity, "/tmp")
+    orchestrator._window_mgr.focus_window.assert_called_once_with("code")
+
+
+@pytest.mark.asyncio
+async def test_browser_activity_focuses_chrome_window(orchestrator):
+    """_execute_browser should focus the browser window after health check."""
+    activity = Activity(
+        ActivityKind.BROWSER, "Research JWT", 10,
+        [], [], ["jwt express middleware"], [],
+    )
+    orchestrator._browser_ctrl = AsyncMock()
+    orchestrator._browser_ctrl.health_check = AsyncMock(return_value=True)
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    await orchestrator._execute_browser(activity)
+    orchestrator._window_mgr.focus_window.assert_called_once_with("google-chrome")
+
+
+@pytest.mark.asyncio
+async def test_terminal_activity_focuses_vscode_window(orchestrator):
+    """_execute_terminal should focus the VS Code window."""
+    activity = Activity(
+        ActivityKind.TERMINAL, "Run tests", 5,
+        [], ["pytest"], [], [],
+    )
+    orchestrator._vscode = AsyncMock()
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    await orchestrator._execute_terminal(activity, "/tmp")
+    orchestrator._window_mgr.focus_window.assert_called_once_with("code")
+
+
+@pytest.mark.asyncio
+async def test_reading_activity_focuses_vscode_window(orchestrator):
+    """_execute_reading should focus the VS Code window."""
+    activity = Activity(
+        ActivityKind.READING, "Read docs", 5,
+        [], [], [], [],
+    )
+    orchestrator._vscode = AsyncMock()
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._activity_monitor = MagicMock()
+
+    await orchestrator._execute_reading(activity)
+    orchestrator._window_mgr.focus_window.assert_called_once_with("code")
+
+
+@pytest.mark.asyncio
+async def test_focus_failure_does_not_block_activity(orchestrator):
+    """If window focus fails, the activity should still execute."""
+    activity = Activity(
+        ActivityKind.CODING, "Write auth", 20,
+        ["src/auth.ts"], [], [], [],
+    )
+    orchestrator._mode = "manual"
+    orchestrator._claude = AsyncMock()
+    orchestrator._claude.execute = AsyncMock(return_value=MagicMock(
+        actions=[], raw_text="done", exit_code=0, error=None
+    ))
+    orchestrator._vscode = AsyncMock()
+    orchestrator._behavior = AsyncMock()
+    orchestrator._window_mgr = AsyncMock()
+    orchestrator._window_mgr.focus_window = AsyncMock(return_value=False)
+    orchestrator._activity_monitor = MagicMock()
+
+    await orchestrator._execute_coding_manual(activity, "/tmp")
+    # Activity should still proceed — Claude should have been called
+    orchestrator._claude.execute.assert_called_once()
+    # pause_natural should NOT be called for window focus (focus returned False)
+    # but may be called for other reasons — just verify activity completed

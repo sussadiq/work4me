@@ -23,6 +23,7 @@ class DoctorChecks:
         ("code", "VS Code"),
         ("ydotool", "ydotool"),
         ("wl-copy", "wl-clipboard"),
+        ("gdbus", "gdbus (GNOME window management)"),
     ]
 
     def check_binary(self, cmd: str, label: str) -> CheckResult:

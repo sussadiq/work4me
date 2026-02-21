@@ -71,6 +71,7 @@ class VSCodeConfig:
     extension_dir: str = ""
     launch_on_start: bool = True
     executable: str = "code"
+    window_class: str = "code"
 
 
 @dataclass
@@ -81,6 +82,7 @@ class BrowserConfig:
     ozone_platform: str = "wayland"
     user_data_dir: str = ""
     profile_directory: str = ""
+    window_class: str = "google-chrome"
 
 
 @dataclass
