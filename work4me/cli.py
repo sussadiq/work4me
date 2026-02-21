@@ -41,9 +41,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode", type=str, choices=["manual", "ai-assisted"],
         default="manual", help="Operating mode (default: manual)"
     )
-    start.add_argument(
-        "--dir", type=str, default=".", help="Working directory for the project"
-    )
     start.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
     start.add_argument(
         "--config", "-c", type=str, default=None,
@@ -76,7 +73,7 @@ async def cmd_start(args: argparse.Namespace) -> int:
     config = load_config(config_path)
 
     # CLI flags override TOML values
-    working_dir = getattr(args, "dir", ".") or args.working_dir
+    working_dir = args.working_dir
     config.working_dir = str(Path(working_dir).resolve())
     config.mode = args.mode
     config.claude.model = args.model

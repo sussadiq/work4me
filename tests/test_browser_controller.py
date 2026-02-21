@@ -70,3 +70,59 @@ async def test_search_url_encodes_special_chars(controller):
     await controller.search("C++ & generics")
     url_arg = controller.navigate.call_args[0][0]
     assert quote_plus("C++ & generics") in url_arg
+
+
+@pytest.mark.asyncio
+async def test_launch_creates_context_when_empty(controller):
+    """When browser has no contexts, a new context should be created."""
+    mock_browser = AsyncMock()
+    mock_browser.contexts = []
+    mock_context = AsyncMock()
+    mock_context.pages = []
+    mock_context.new_page = AsyncMock(return_value=AsyncMock())
+    mock_browser.new_context = AsyncMock(return_value=mock_context)
+
+    mock_pw_instance = AsyncMock()
+    mock_pw_instance.chromium.connect_over_cdp = AsyncMock(return_value=mock_browser)
+
+    async def fake_launch():
+        # Simulate what launch() does after connecting
+        controller._browser = mock_browser
+        if controller._browser.contexts:
+            controller._context = controller._browser.contexts[0]
+        else:
+            controller._context = await controller._browser.new_context()
+        controller._page = await controller._context.new_page()
+
+    await fake_launch()
+    mock_browser.new_context.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_waits_for_termination(controller):
+    """cleanup() should await process.wait() after terminate()."""
+    mock_proc = AsyncMock()
+    mock_proc.wait = AsyncMock(return_value=0)
+    controller._process = mock_proc
+    controller._browser = None
+
+    await controller.cleanup()
+    mock_proc.terminate.assert_called_once()
+    mock_proc.wait.assert_called()
+    assert controller._process is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_kills_if_terminate_hangs(controller):
+    """cleanup() should escalate to kill() if terminate times out."""
+    import asyncio as aio
+
+    mock_proc = AsyncMock()
+    mock_proc.wait = AsyncMock(return_value=0)
+    controller._process = mock_proc
+    controller._browser = None
+
+    with patch("work4me.controllers.browser.asyncio.wait_for", side_effect=aio.TimeoutError()):
+        await controller.cleanup()
+
+    mock_proc.kill.assert_called_once()

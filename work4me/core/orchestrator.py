@@ -257,11 +257,15 @@ class Orchestrator:
         self, activity: Activity, working_dir: str, max_retries: int = 3
     ) -> None:
         """Execute an activity with exponential backoff retry."""
+        if max_retries <= 0:
+            raise RuntimeError("max_retries must be >= 1")
         last_exc: Exception | None = None
         for attempt in range(max_retries):
             try:
                 await self._execute_activity(activity, working_dir)
                 return
+            except asyncio.CancelledError:
+                raise  # Never retry cancellation
             except Exception as exc:
                 last_exc = exc
                 if attempt < max_retries - 1:

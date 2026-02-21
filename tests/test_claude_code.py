@@ -1,7 +1,8 @@
 # tests/test_claude_code.py
 """Tests for ClaudeCodeManager stream parsing and text capture."""
 
-from work4me.controllers.claude_code import ClaudeCodeManager, ClaudeConfig
+import pytest
+from work4me.controllers.claude_code import ClaudeCodeManager, CapturedAction, ActionKind, ClaudeConfig
 
 
 def test_raw_text_captured_from_assistant_message():
@@ -66,3 +67,58 @@ def test_raw_text_ignores_system_events():
     event = {"type": "system", "data": "init"}
     texts = mgr._extract_text_blocks(event)
     assert texts == []
+
+
+@pytest.mark.asyncio
+async def test_dedup_keeps_edits_with_different_old_string():
+    """Two edits with same file+new_string but different old_string must both be yielded."""
+    mgr = ClaudeCodeManager(ClaudeConfig())
+
+    event = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "Edit",
+                    "input": {"file_path": "x.py", "old_string": "foo", "new_string": "baz"},
+                },
+                {
+                    "type": "tool_use",
+                    "name": "Edit",
+                    "input": {"file_path": "x.py", "old_string": "bar", "new_string": "baz"},
+                },
+            ]
+        },
+    }
+
+    # Simulate streaming by encoding event as JSON line
+    import json
+    import asyncio
+
+    line = json.dumps(event).encode() + b"\n"
+    reader = asyncio.StreamReader()
+    reader.feed_data(line)
+    reader.feed_eof()
+
+    actions = [a async for a in mgr._parse_stream(reader)]
+    assert len(actions) == 2
+    assert actions[0].old_string == "foo"
+    assert actions[1].old_string == "bar"
+
+
+@pytest.mark.asyncio
+async def test_execute_raises_if_stdout_pipe_missing():
+    """Missing stdout pipe should produce an error, not pass silently under -O."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    import asyncio
+
+    mgr = ClaudeCodeManager(ClaudeConfig())
+
+    mock_proc = MagicMock()
+    mock_proc.stdout = None
+    mock_proc.stderr = MagicMock()
+
+    with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        result = await mgr.execute("test prompt", "/tmp")
+    assert "stdout pipe" in result.error

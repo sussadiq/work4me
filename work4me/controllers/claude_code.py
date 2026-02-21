@@ -126,8 +126,10 @@ class ClaudeCodeManager:
                 cwd=working_dir,
             )
 
-            assert self._process.stdout is not None
-            assert self._process.stderr is not None
+            if self._process.stdout is None:
+                raise RuntimeError("subprocess stdout pipe is missing")
+            if self._process.stderr is None:
+                raise RuntimeError("subprocess stderr pipe is missing")
 
             async for action in self._parse_stream(self._process.stdout):
                 result.actions.append(action)
@@ -190,7 +192,8 @@ class ClaudeCodeManager:
             cwd=working_dir,
         )
 
-        assert self._process.stdout is not None
+        if self._process.stdout is None:
+            raise RuntimeError("subprocess stdout pipe is missing")
 
         try:
             async for action in self._parse_stream(self._process.stdout):
@@ -230,7 +233,7 @@ class ClaudeCodeManager:
 
             for action in self._extract_actions(event):
                 # Deduplicate using a hash of the action content
-                action_key = f"{action.kind.value}:{action.file_path}:{action.command}:{hash(action.new_string or action.content)}"
+                action_key = f"{action.kind.value}:{action.file_path}:{action.command}:{hash(action.old_string)}:{hash(action.new_string or action.content)}"
                 if action_key not in seen_tool_ids:
                     seen_tool_ids.add(action_key)
                     yield action

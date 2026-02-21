@@ -20,8 +20,8 @@ def test_start_default_mode_is_manual():
 
 def test_start_accepts_working_dir():
     parser = build_parser()
-    args = parser.parse_args(["start", "--task", "Build API", "--hours", "4", "--dir", "/tmp/project"])
-    assert args.dir == "/tmp/project"
+    args = parser.parse_args(["start", "--task", "Build API", "--hours", "4", "--working-dir", "/tmp/project"])
+    assert args.working_dir == "/tmp/project"
 
 
 def test_start_accepts_config_flag():
@@ -43,7 +43,7 @@ async def test_cmd_start_uses_load_config(tmp_path):
             MockOrch.return_value.run = AsyncMock()
             args = argparse.Namespace(
                 task="test", hours=1.0, working_dir=".", model="sonnet",
-                max_budget=5.0, mode="manual", dir=".", verbose=False,
+                max_budget=5.0, mode="manual", verbose=False,
                 config=str(toml_file),
             )
             await cmd_start(args)
@@ -59,7 +59,7 @@ async def test_cmd_start_no_config_flag(tmp_path):
             MockOrch.return_value.run = AsyncMock()
             args = argparse.Namespace(
                 task="test", hours=1.0, working_dir=".", model="sonnet",
-                max_budget=5.0, mode="manual", dir=".", verbose=False,
+                max_budget=5.0, mode="manual", verbose=False,
                 config=None,
             )
             await cmd_start(args)

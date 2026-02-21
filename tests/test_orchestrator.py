@@ -283,3 +283,30 @@ async def test_replay_action_allows_valid_path(orchestrator):
     action = CapturedAction(kind=AK.EDIT, file_path="src/auth.py", new_string="code")
     await orchestrator._replay_action_in_vscode(action)
     orchestrator._vscode.open_file.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_retry_zero_raises_runtime_error():
+    """max_retries=0 should raise RuntimeError, not TypeError from raise None."""
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+    orch._behavior = AsyncMock()
+    orch._activity_monitor = MagicMock()
+
+    activity = Activity(ActivityKind.CODING, "test", 5, [], [], [], [])
+    with pytest.raises(RuntimeError, match="max_retries must be >= 1"):
+        await orch._execute_activity_with_retry(activity, "/tmp", max_retries=0)
+
+
+@pytest.mark.asyncio
+async def test_retry_propagates_cancelled_error():
+    """CancelledError should not be retried."""
+    config = Config(mode="manual")
+    orch = Orchestrator(config)
+    orch._behavior = AsyncMock()
+    orch._activity_monitor = MagicMock()
+
+    orch._execute_activity = AsyncMock(side_effect=asyncio.CancelledError)
+    activity = Activity(ActivityKind.CODING, "test", 5, [], [], [], [])
+    with pytest.raises(asyncio.CancelledError):
+        await orch._execute_activity_with_retry(activity, "/tmp", max_retries=3)

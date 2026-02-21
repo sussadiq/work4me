@@ -53,7 +53,10 @@ class BrowserController:
         self._browser = await self._playwright.chromium.connect_over_cdp(
             f"http://localhost:{self._config.debug_port}"
         )
-        self._context = self._browser.contexts[0]
+        if self._browser.contexts:
+            self._context = self._browser.contexts[0]
+        else:
+            self._context = await self._browser.new_context()
         self._page = (
             self._context.pages[0]
             if self._context.pages
@@ -154,4 +157,9 @@ class BrowserController:
             logger.warning("Failed to close playwright", exc_info=True)
         if self._process:
             self._process.terminate()
+            try:
+                await asyncio.wait_for(self._process.wait(), timeout=5.0)
+            except (asyncio.TimeoutError, TimeoutError):
+                self._process.kill()
+                await self._process.wait()
             self._process = None
