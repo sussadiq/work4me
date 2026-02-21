@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "work4me"
+version = "0.1.0"
+description = "Desktop AI agent that performs real software engineering work with human-like pacing"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "libtmux>=0.37",
+    "pynvim>=0.5",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "mypy>=1.8",
+]
+
+[project.scripts]
+work4me = "work4me.cli:main"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

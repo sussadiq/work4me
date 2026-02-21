@@ -1,0 +1,280 @@
+# Claude Code CLI Integration
+
+## Invocation
+
+```bash
+claude -p "prompt" \
+  --output-format stream-json \
+  --dangerously-skip-permissions \
+  --max-turns 10 \
+  --max-budget-usd 1.0 \
+  --model sonnet
+```
+
+## Complete Flag Reference
+
+### Core Invocation Patterns
+
+| Command | Description |
+|---|---|
+| `claude` | Start interactive REPL |
+| `claude "query"` | Start REPL with initial prompt |
+| `claude -p "query"` | Non-interactive print mode — run, print result, exit |
+| `cat file \| claude -p "query"` | Process piped content via stdin |
+| `claude -c` | Continue most recent conversation |
+| `claude -r "session" "query"` | Resume a specific session by ID or name |
+
+### Key Flags for Automation
+
+| Flag | Purpose |
+|---|---|
+| `--print`, `-p` | Non-interactive mode |
+| `--dangerously-skip-permissions` | Skip ALL permission prompts (auto-approve everything) |
+| `--allowedTools` | Tools that execute without prompting (e.g., `"Bash(git log *)" "Read"`) |
+| `--disallowedTools` | Tools completely removed from context |
+| `--tools` | Restrict which built-in tools are available (e.g., `"Bash,Edit,Read"`) |
+| `--model` | Select model (`sonnet`, `opus`, or full model ID) |
+| `--max-budget-usd` | Cost cap before stopping (print mode only) |
+| `--max-turns` | Limit agentic turns (print mode only) |
+| `--output-format` | `text`, `json`, or `stream-json` |
+| `--continue`, `-c` | Continue most recent conversation |
+| `--resume`, `-r` | Resume a specific session by ID or name |
+| `--session-id` | Use a specific UUID for the session |
+| `--append-system-prompt` | Add instructions while keeping defaults |
+| `--system-prompt` | Completely replace the system prompt |
+| `--mcp-config` | Load MCP servers from a JSON file |
+| `--json-schema` | Get validated JSON output matching a schema |
+| `--verbose` | Full turn-by-turn logging |
+| `--permission-mode` | `default`, `acceptEdits`, `plan`, `dontAsk`, `bypassPermissions` |
+| `--fallback-model` | Fallback model when primary is overloaded |
+| `--no-session-persistence` | Don't save session to disk |
+| `--add-dir` | Add additional working directories |
+| `--worktree`, `-w` | Start in an isolated git worktree |
+| `--input-format stream-json` | Feed structured input programmatically |
+| `--fork-session` | Create new session ID when resuming |
+
+## Output Formats
+
+### stream-json (Primary for Work4Me)
+
+Real-time newline-delimited JSON events:
+
+```bash
+claude -p "Write auth middleware" \
+  --output-format stream-json \
+  --verbose \
+  --include-partial-messages
+```
+
+Filter for text deltas:
+```bash
+claude -p "Write a poem" --output-format stream-json --verbose --include-partial-messages | \
+  jq -rj 'select(.type == "stream_event" and .event.delta.type? == "text_delta") | .event.delta.text'
+```
+
+Key event types to capture:
+- `tool_use` where tool is `Edit` → code to replay visibly
+- `tool_use` where tool is `Bash` → command to replay visibly
+- `result` → final summary with `session_id` for resumption
+
+### json (For Structured Output)
+
+```bash
+claude -p "Extract function names" \
+  --output-format json \
+  --json-schema '{"type":"object","properties":{"functions":{"type":"array","items":{"type":"string"}}}}'
+```
+
+Returns: `result`, `session_id`, usage metadata. Structured result in `structured_output` field.
+
+## Session Management
+
+### Continue/Resume
+
+```bash
+# Continue most recent
+claude -c -p "Check for errors"
+
+# Resume specific session
+session_id=$(claude -p "Start review" --output-format json | jq -r '.session_id')
+claude -p "Continue review" --resume "$session_id"
+
+# Fixed session ID
+claude --session-id "550e8400-e29b-41d4-a716-446655440000" -p "query"
+
+# Fork (preserves original)
+claude --fork-session --resume "$session_id" -p "try alternative"
+```
+
+### CLAUDE.md Files
+
+Persistent context across sessions. Read at start of every session.
+
+| Location | Scope |
+|---|---|
+| `~/.claude/CLAUDE.md` | Global — personal preferences |
+| `./CLAUDE.md` or `./.claude/CLAUDE.md` | Project — team conventions (committed to git) |
+| `./.claude/CLAUDE.local.md` | Local project — personal notes (gitignored) |
+
+Supports `@path/to/import` syntax for importing other files.
+
+**For Work4Me:** Use CLAUDE.md for persistent project context (architecture, build commands, coding standards) without consuming conversation tokens.
+
+## Permission System
+
+### Permission Tiers
+
+| Tool Type | Example | Approval Required |
+|---|---|---|
+| Read-only | File reads, Grep, Glob | No |
+| Bash commands | Shell execution | Yes |
+| File modification | Edit/Write | Yes |
+
+### Permission Modes
+
+| Mode | Behavior |
+|---|---|
+| `default` | Prompts on first use |
+| `acceptEdits` | Auto-accepts file edits |
+| `plan` | Read-only, no modifications |
+| `dontAsk` | Auto-denies unless pre-approved |
+| `bypassPermissions` | Skips all prompts (requires `--dangerously-skip-permissions`) |
+
+### Settings Files
+
+- `~/.claude/settings.json` — user-level
+- `.claude/settings.json` — project-level (shared)
+- `.claude/settings.local.json` — local project
+- `/etc/claude-code/managed-settings.json` — system-wide
+
+```json
+{
+  "permissions": {
+    "allow": ["Bash(npm run *)", "Bash(git commit *)", "Read", "Edit"],
+    "deny": ["Bash(git push *)", "Bash(rm -rf *)"]
+  }
+}
+```
+
+### AllowedTools Syntax
+
+Uses glob patterns: `"Bash(git diff *)"` allows any command starting with `git diff `. The space before `*` matters.
+
+**Known bug:** `--allowedTools` may be ignored in non-interactive mode with `bypassPermissions`. Use `--disallowedTools` (works correctly) or `--dangerously-skip-permissions`.
+
+## MCP (Model Context Protocol)
+
+Claude Code fully supports MCP servers.
+
+```bash
+# Add MCP server
+claude mcp add --transport stdio my-server -- npx -y my-package
+claude mcp add --transport http my-api https://api.example.com/mcp
+
+# Config file: .mcp.json
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "/path/to/server",
+      "args": [],
+      "env": {}
+    }
+  }
+}
+
+# Load at startup
+claude --mcp-config ./mcp.json -p "query"
+
+# Claude Code as MCP server
+claude mcp serve
+```
+
+**For Work4Me:** Could expose an MCP server giving Claude Code additional tools (project management queries, browser automation, terminal state).
+
+## Error Handling
+
+### Exit Codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | General error |
+| 2 | Configuration error |
+| 126 | Permission denied |
+| 127 | Command not found |
+| 130 | Interrupted (SIGINT) |
+
+### Programmatic Error Handling
+
+```python
+proc = await asyncio.create_subprocess_exec(
+    'claude', '-p', prompt,
+    '--output-format', 'stream-json',
+    '--dangerously-skip-permissions',
+    '--max-turns', str(max_turns),
+    '--max-budget-usd', str(max_budget),
+    stdout=asyncio.subprocess.PIPE,
+    stderr=asyncio.subprocess.PIPE,
+    cwd=working_dir
+)
+
+async for line in proc.stdout:
+    event = json.loads(line)
+    # Process stream-json events...
+
+await proc.wait()
+if proc.returncode != 0:
+    stderr = await proc.stderr.read()
+    # Handle error based on return code
+```
+
+## API Alternative
+
+### When to Use Anthropic API Directly
+
+| Aspect | Claude Code CLI | Anthropic API |
+|---|---|---|
+| Tool use | Built-in (Read, Edit, Bash, Glob, Grep) | Define your own tools |
+| Agent loop | Automatic with retry/context management | Build your own |
+| Session mgmt | Built-in (continue, resume) | Manual |
+| Computer Use | Not applicable | Beta tool for GUI control |
+| Token efficiency | Higher overhead (system prompt, tools) | 37% reduction possible |
+| Cost control | `--max-budget-usd` | Manual tracking |
+
+**Recommendation for Work4Me:** Use Claude Code CLI for software engineering tasks (already has all tools). Use API directly only for Computer Use GUI interaction or to minimize token costs on specific workflows.
+
+## Claude Code Prompt Templates
+
+### Task Decomposition Prompt
+
+```
+You are a senior software engineer planning a coding task. Decompose the following task into a sequence of developer activities.
+
+Task: {task_description}
+Time Budget: {hours} hours
+Project Context: {project_context}
+
+For each activity, specify:
+1. kind: one of CODING, READING, TERMINAL, BROWSER, THINKING
+2. description: what the developer does
+3. estimated_minutes: how long it should take
+4. files_involved: which files will be created/modified/read
+5. commands: any terminal commands to run
+6. search_queries: any web searches needed
+7. dependencies: IDs of activities that must complete first
+
+Return as JSON array. Total estimated_minutes ≈ {hours * 60 * 0.70} (70% of budget).
+```
+
+### Coding Activity Prompt
+
+```
+You are working on: {activity.description}
+
+Project directory: {working_dir}
+Files to modify: {activity.files_involved}
+
+Write the code. Use Edit tool for file changes and Bash tool for terminal commands.
+Follow the project's existing style and conventions.
+{project_context_from_claude_md}
+```
