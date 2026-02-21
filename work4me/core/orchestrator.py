@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import shlex
 import time
 from datetime import datetime, timezone
@@ -319,7 +320,7 @@ class Orchestrator:
         elif activity.kind == ActivityKind.READING:
             await self._execute_reading(activity)
         elif activity.kind == ActivityKind.THINKING:
-            await self._behavior.idle_think(activity.estimated_minutes * 60)
+            await self._execute_thinking(activity)
 
         self._activity_monitor.record_event("keyboard")
 
@@ -508,6 +509,64 @@ class Orchestrator:
                 self._activity_monitor.record_event("keyboard")
             except Exception as exc:
                 logger.warning("Failed to open file %s: %s", resolved, exc)
+
+    # ------------------------------------------------------------------
+    # Thinking activity (browser research)
+    # ------------------------------------------------------------------
+
+    async def _execute_thinking(self, activity: Activity) -> None:
+        """Think by researching in the browser — docs, Stack Overflow, etc."""
+        total_seconds = activity.estimated_minutes * 60
+
+        # Try browser research first
+        if await self._browser_ctrl.health_check():
+            queries = activity.search_queries or self._generate_research_queries(activity)
+            if queries:
+                await self._research_with_browser(queries, total_seconds)
+                return
+
+        # Fallback: pure thinking with micro-movements
+        logger.info("No browser available — thinking for %.0f seconds", total_seconds)
+        await self._behavior.idle_think(total_seconds)
+
+    async def _research_with_browser(self, queries: list[str], total_seconds: float) -> None:
+        """Browse research queries with natural reading pauses."""
+        await self._focus_app_window(self.config.browser.window_class)
+        time_per_query = total_seconds / max(len(queries), 1)
+
+        for query in queries:
+            logger.info("Researching: %s", query)
+            try:
+                await self._browser_ctrl.search(query)
+                await asyncio.sleep(2.0)
+
+                # Read and scroll through results (simulates reading)
+                for _ in range(random.randint(2, 4)):
+                    await self._browser_ctrl.scroll_down(pixels=random.randint(200, 500))
+                    read_pause = random.uniform(3.0, 8.0)
+                    await asyncio.sleep(read_pause)
+                    self._activity_monitor.record_event("mouse")
+
+                # Think pause between queries
+                think_pause = random.uniform(5.0, 15.0)
+                await asyncio.sleep(think_pause)
+                self._activity_monitor.record_event("keyboard")
+
+            except Exception as exc:
+                logger.warning("Research query failed (%s): %s", query[:40], exc)
+                await self._behavior.idle_think(min(time_per_query, 30.0))
+
+    def _generate_research_queries(self, activity: Activity) -> list[str]:
+        """Generate search queries from activity description."""
+        desc = activity.description.lower()
+        queries: list[str] = []
+        # Use the description directly as a search query (trimmed)
+        if len(desc) > 10:
+            queries.append(activity.description[:80])
+        # Add a "best practices" query if it's about code
+        if any(w in desc for w in ("code", "implement", "fix", "refactor", "review")):
+            queries.append(f"{activity.description[:50]} best practices")
+        return queries[:3]
 
     # ------------------------------------------------------------------
     # Break and wrap-up

@@ -132,7 +132,10 @@ class BehaviorEngine:
             cfg.idle_micro_movement_max,
         )
 
-        logger.debug("Thinking for %.1f seconds", duration_seconds)
+        logger.info(
+            "Thinking for %.0f seconds (micro-movements every %.0f-%.0fs)",
+            duration_seconds, cfg.idle_micro_movement_min, cfg.idle_micro_movement_max,
+        )
 
         while elapsed < duration_seconds:
             wait = min(interval, duration_seconds - elapsed)
