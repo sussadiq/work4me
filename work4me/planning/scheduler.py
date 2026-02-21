@@ -86,11 +86,20 @@ class Scheduler:
 
     def _generate_session_durations(self, total_minutes: float) -> list[tuple[float, float]]:
         """Generate session durations with Gaussian noise, scaled to budget."""
+        # Scale number of sessions with budget (1 session per ~60 min, min 2, max 6)
+        num_sessions = max(2, min(6, round(total_minutes / 60)))
         scale = total_minutes / 240.0
         results = []
-        for (mean, sigma, lo, hi), (bmean, bsigma, blo, bhi) in zip(SESSION_TEMPLATES, BREAK_TEMPLATES):
+        for i in range(num_sessions):
+            tmpl_idx = i % len(SESSION_TEMPLATES)
+            mean, sigma, lo, hi = SESSION_TEMPLATES[tmpl_idx]
+            bmean, bsigma, blo, bhi = BREAK_TEMPLATES[tmpl_idx]
             dur = max(lo, min(hi, self._rng.gauss(mean, sigma))) * scale
-            brk = max(blo, min(bhi, self._rng.gauss(bmean, bsigma))) * scale if bmean > 0 else 0
+            # No break after last session
+            if i == num_sessions - 1:
+                brk = 0
+            else:
+                brk = max(blo, min(bhi, self._rng.gauss(bmean, bsigma))) * scale if bmean > 0 else 0
             results.append((dur, brk))
         return results
 

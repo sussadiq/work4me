@@ -63,3 +63,37 @@ async def test_full_flow_mode_a(mock_schedule):
     orch._planner.decompose.assert_called_once()
     orch._wrap_up.assert_called_once()
     orch._cleanup.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_full_flow_mode_b(mock_schedule):
+    config = Config(mode="ai-assisted")
+    orch = Orchestrator(config)
+
+    # Mock all external controllers
+    orch._vscode = AsyncMock()
+    orch._browser_ctrl = AsyncMock()
+    orch._behavior = AsyncMock()
+    orch._claude = AsyncMock()
+    orch._planner = AsyncMock()
+    orch._planner.decompose = AsyncMock(return_value=TaskPlan(
+        "Test task", mock_schedule.sessions[0].activities
+    ))
+    orch._scheduler = MagicMock()
+    orch._scheduler.build_schedule = MagicMock(return_value=mock_schedule)
+    orch._activity_monitor = MagicMock()
+    orch._activity_monitor.recommended_adjustment = MagicMock(
+        return_value=MagicMock(value="none")
+    )
+    orch._activity_monitor.record_event = MagicMock()
+
+    orch._initialize = AsyncMock()
+    orch._wrap_up = AsyncMock()
+    orch._cleanup = AsyncMock()
+
+    await orch.run("Test task", time_budget_minutes=30, working_dir="/tmp")
+
+    orch._initialize.assert_called_once()
+    # Mode B should use VS Code terminal, not headless Claude
+    orch._vscode.show_terminal.assert_called()
+    orch._cleanup.assert_called_once()

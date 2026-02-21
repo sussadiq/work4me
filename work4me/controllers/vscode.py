@@ -54,7 +54,7 @@ class VSCodeController:
         # Don't wait — VS Code runs independently
         logger.info("VS Code launched (pid=%d)", proc.pid)
 
-    async def send_command(self, command: str, **kwargs: Any) -> dict:
+    async def send_command(self, command: str, timeout: float = 30.0, **kwargs: Any) -> dict:
         """Send a command to the VS Code extension and return the result."""
         if self._ws is None:
             raise ConnectionError("Not connected to VS Code bridge")
@@ -62,7 +62,10 @@ class VSCodeController:
         self._msg_id += 1
         msg = {"id": str(self._msg_id), "command": command, **kwargs}
         await self._ws.send(json.dumps(msg))
-        raw = await self._ws.recv()
+        try:
+            raw = await asyncio.wait_for(self._ws.recv(), timeout=timeout)
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"VS Code command '{command}' timed out after {timeout}s")
         response = json.loads(raw)
 
         if not response.get("success"):

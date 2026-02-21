@@ -134,11 +134,17 @@ class BrowserController:
 
     async def cleanup(self) -> None:
         """Disconnect from browser (don't close it)."""
-        if self._browser:
-            await self._browser.disconnect()
-            self._browser = None
-        if hasattr(self, "_playwright") and self._playwright:
-            await self._playwright.__aexit__(None, None, None)
+        try:
+            if self._browser:
+                await self._browser.disconnect()
+                self._browser = None
+        except Exception:
+            logger.warning("Failed to disconnect browser", exc_info=True)
+        try:
+            if hasattr(self, "_playwright") and self._playwright:
+                await self._playwright.__aexit__(None, None, None)
+        except Exception:
+            logger.warning("Failed to close playwright", exc_info=True)
         if self._process:
             self._process.terminate()
             self._process = None

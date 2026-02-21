@@ -225,6 +225,10 @@ class Orchestrator:
 
             await self._execute_activity(activity, working_dir)
 
+            # Persist state after each activity
+            self.snapshot.current_activity_index = i + 1
+            self._persist_state()
+
             # Check activity health between activities
             await self._check_activity_health()
 
