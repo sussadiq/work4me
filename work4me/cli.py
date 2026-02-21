@@ -8,7 +8,8 @@ import logging
 import sys
 from pathlib import Path
 
-from work4me.config import Config
+from work4me.config import Config, load_config
+from work4me.core.orchestrator import Orchestrator
 
 
 logger = logging.getLogger("work4me")
@@ -44,6 +45,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--dir", type=str, default=".", help="Working directory for the project"
     )
     start.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
+    start.add_argument(
+        "--config", "-c", type=str, default=None,
+        help="Path to TOML config file (default: ~/.config/work4me/config.toml)",
+    )
 
     # stop
     sub.add_parser("stop", help="Gracefully stop the current session")
@@ -67,16 +72,16 @@ def setup_logging(verbose: bool = False) -> None:
 
 
 async def cmd_start(args: argparse.Namespace) -> int:
+    config_path = Path(args.config) if getattr(args, "config", None) else None
+    config = load_config(config_path)
+
+    # CLI flags override TOML values
     working_dir = getattr(args, "dir", ".") or args.working_dir
-    config = Config(
-        working_dir=str(Path(working_dir).resolve()),
-        default_hours=args.hours,
-        mode=args.mode,
-    )
+    config.working_dir = str(Path(working_dir).resolve())
+    config.mode = args.mode
     config.claude.model = args.model
     config.claude.max_budget_usd = args.max_budget
-
-    from work4me.core.orchestrator import Orchestrator
+    config.default_hours = args.hours
 
     orchestrator = Orchestrator(config)
     try:
