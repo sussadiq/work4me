@@ -47,7 +47,7 @@ class ClaudeConfig:
     cli_path: str = "claude"
     model: str = "sonnet"
     max_turns: int = 15
-    max_budget_usd: float = 5.0
+    max_budget_usd: float = 0.0  # 0 = unlimited (Max plan)
     dangerously_skip_permissions: bool = True
     extra_args: list[str] = field(default_factory=list)
 
@@ -57,8 +57,24 @@ class DesktopConfig:
     compositor: str = "auto"
     input_method: str = "auto"
     terminal: str = "auto"
-    editor: str = "neovim"
+    editor: str = "vscode"
     browser: str = "chromium"
+
+
+@dataclass
+class VSCodeConfig:
+    websocket_port: int = 9876
+    extension_dir: str = ""
+    launch_on_start: bool = True
+    executable: str = "code"
+
+
+@dataclass
+class BrowserConfig:
+    chromium_path: str = "chromium"
+    debug_port: int = 9222
+    enabled: bool = True
+    ozone_platform: str = "wayland"
 
 
 @dataclass
@@ -68,7 +84,10 @@ class Config:
     session: SessionConfig = field(default_factory=SessionConfig)
     claude: ClaudeConfig = field(default_factory=ClaudeConfig)
     desktop: DesktopConfig = field(default_factory=DesktopConfig)
+    vscode: VSCodeConfig = field(default_factory=VSCodeConfig)
+    browser: BrowserConfig = field(default_factory=BrowserConfig)
 
+    mode: str = "manual"  # "manual" or "ai-assisted"
     default_hours: float = 4.0
     working_dir: str = "."
     log_level: str = "INFO"
