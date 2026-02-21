@@ -20,6 +20,7 @@ class BrowserController:
         self._context: Any = None
         self._page: Any = None
         self._process: Optional[asyncio.subprocess.Process] = None
+        self._browser_available: bool = False
 
     async def launch(self) -> None:
         """Launch Chromium with remote debugging and connect via Playwright."""
@@ -30,6 +31,10 @@ class BrowserController:
             "--no-first-run",
             "--no-default-browser-check",
         ]
+        if self._config.user_data_dir:
+            cmd.append(f"--user-data-dir={self._config.user_data_dir}")
+        if self._config.profile_directory:
+            cmd.append(f"--profile-directory={self._config.profile_directory}")
         self._process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.DEVNULL,
@@ -62,6 +67,7 @@ class BrowserController:
             if self._context.pages
             else await self._context.new_page()
         )
+        self._browser_available = True
         logger.info("Connected to Chromium via CDP")
 
     async def navigate(self, url: str) -> None:
@@ -109,7 +115,7 @@ class BrowserController:
         """Get the visible text content of the page."""
         if not self._page:
             raise RuntimeError("Browser not launched")
-        return await self._page.inner_text("body")
+        return str(await self._page.inner_text("body"))
 
     async def new_tab(self, url: str = "about:blank") -> None:
         """Open a new tab."""
@@ -144,6 +150,7 @@ class BrowserController:
 
     async def cleanup(self) -> None:
         """Disconnect from browser (don't close it)."""
+        self._browser_available = False
         try:
             if self._browser:
                 await self._browser.disconnect()
@@ -152,14 +159,19 @@ class BrowserController:
             logger.warning("Failed to disconnect browser", exc_info=True)
         try:
             if hasattr(self, "_playwright") and self._playwright:
-                await self._playwright.__aexit__(None, None, None)
+                await self._playwright.stop()
         except Exception:
             logger.warning("Failed to close playwright", exc_info=True)
         if self._process:
-            self._process.terminate()
-            try:
-                await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except (asyncio.TimeoutError, TimeoutError):
-                self._process.kill()
-                await self._process.wait()
+            if self._process.returncode is None:
+                try:
+                    self._process.terminate()
+                except ProcessLookupError:
+                    pass
+                else:
+                    try:
+                        await asyncio.wait_for(self._process.wait(), timeout=5.0)
+                    except (asyncio.TimeoutError, TimeoutError):
+                        self._process.kill()
+                        await self._process.wait()
             self._process = None

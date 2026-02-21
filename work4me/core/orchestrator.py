@@ -31,7 +31,7 @@ from work4me.behavior.activity_monitor import ActivityMonitor, BehaviorAdjustmen
 from work4me.behavior.engine import BehaviorEngine
 from work4me.config import Config
 from work4me.controllers.browser import BrowserController
-from work4me.controllers.claude_code import ActionKind, ClaudeCodeManager
+from work4me.controllers.claude_code import ActionKind, CapturedAction, ClaudeCodeManager
 from work4me.controllers.vscode import VSCodeController
 from work4me.core.events import EventBus, StateChanged, TaskProgress
 from work4me.core.state import State, StateMachine, StateSnapshot
@@ -72,7 +72,7 @@ class Orchestrator:
         self._time_budget_seconds: float = 0
 
         # Watchdog
-        self._watchdog_task: asyncio.Task | None = None
+        self._watchdog_task: asyncio.Task[None] | None = None
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -293,6 +293,7 @@ class Orchestrator:
                         attempt + 1, max_retries, wait, exc,
                     )
                     await asyncio.sleep(wait)
+        assert last_exc is not None
         raise last_exc
 
     async def _execute_activity(self, activity: Activity, working_dir: str) -> None:
@@ -354,7 +355,7 @@ class Orchestrator:
             return None
         return str(resolved)
 
-    async def _replay_action_in_vscode(self, action) -> None:
+    async def _replay_action_in_vscode(self, action: CapturedAction) -> None:
         """Replay a Claude Code action visibly in VS Code."""
         if action.kind == ActionKind.EDIT or action.kind == ActionKind.WRITE:
             file_path = self._resolve_activity_path(action.file_path) if action.file_path else None
@@ -579,16 +580,17 @@ class Orchestrator:
             except Exception:
                 logger.error("VS Code restart failed", exc_info=True)
 
-        try:
-            br_ok = await self._browser_ctrl.health_check()
-        except Exception:
-            br_ok = False
-        if not br_ok:
-            logger.warning("Browser unhealthy, restarting...")
+        if self._browser_ctrl._browser_available:
             try:
-                await self._browser_ctrl.restart()
+                br_ok = await self._browser_ctrl.health_check()
             except Exception:
-                logger.error("Browser restart failed", exc_info=True)
+                br_ok = False
+            if not br_ok:
+                logger.warning("Browser unhealthy, restarting...")
+                try:
+                    await self._browser_ctrl.restart()
+                except Exception:
+                    logger.error("Browser restart failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Cleanup and state management
@@ -596,7 +598,10 @@ class Orchestrator:
 
     async def _cleanup(self) -> None:
         """Close all connections."""
-        for name, ctrl in [("vscode", self._vscode), ("browser", self._browser_ctrl)]:
+        controllers: list[tuple[str, VSCodeController | BrowserController]] = [
+            ("vscode", self._vscode), ("browser", self._browser_ctrl),
+        ]
+        for name, ctrl in controllers:
             try:
                 await ctrl.cleanup()
             except Exception:

@@ -128,3 +128,92 @@ async def test_cleanup_kills_if_terminate_hangs(controller):
         await controller.cleanup()
 
     mock_proc.kill.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_handles_process_lookup_error(controller):
+    """cleanup() should handle ProcessLookupError when process already exited."""
+    mock_proc = MagicMock()
+    mock_proc.returncode = None
+    mock_proc.terminate = MagicMock(side_effect=ProcessLookupError())
+    controller._process = mock_proc
+    controller._browser = None
+
+    await controller.cleanup()
+    assert controller._process is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_skips_terminate_when_already_exited(controller):
+    """cleanup() should skip terminate when process already has a returncode."""
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    controller._process = mock_proc
+    controller._browser = None
+
+    await controller.cleanup()
+    mock_proc.terminate.assert_not_called()
+    assert controller._process is None
+
+
+def test_browser_available_flag_defaults_false(controller):
+    """_browser_available defaults to False."""
+    assert controller._browser_available is False
+
+
+@pytest.mark.asyncio
+async def test_launch_adds_user_data_dir():
+    """Launch should include --user-data-dir when configured."""
+    config = BrowserConfig(user_data_dir="/home/user/.chrome-profile")
+    ctrl = BrowserController(config)
+
+    mock_proc = AsyncMock()
+    mock_proc.pid = 1234
+
+    mock_pw_instance = AsyncMock()
+    mock_browser = AsyncMock()
+    mock_browser.contexts = []
+    mock_ctx = AsyncMock()
+    mock_ctx.pages = []
+    mock_ctx.new_page = AsyncMock(return_value=AsyncMock())
+    mock_browser.new_context = AsyncMock(return_value=mock_ctx)
+    mock_pw_instance.chromium.connect_over_cdp = AsyncMock(return_value=mock_browser)
+    mock_pw_cm = AsyncMock()
+    mock_pw_cm.__aenter__ = AsyncMock(return_value=mock_pw_instance)
+
+    with patch("work4me.controllers.browser.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec, \
+         patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock), \
+         patch.dict("sys.modules", {"playwright": MagicMock(), "playwright.async_api": MagicMock(async_playwright=lambda: mock_pw_cm)}):
+        await ctrl.launch()
+
+    cmd_args = mock_exec.call_args[0]
+    assert any("--user-data-dir=/home/user/.chrome-profile" in str(a) for a in cmd_args)
+
+
+@pytest.mark.asyncio
+async def test_launch_adds_profile_directory():
+    """Launch should include --profile-directory when configured."""
+    config = BrowserConfig(profile_directory="Profile 1")
+    ctrl = BrowserController(config)
+
+    mock_proc = AsyncMock()
+    mock_proc.pid = 1234
+
+    mock_pw_instance = AsyncMock()
+    mock_browser = AsyncMock()
+    mock_browser.contexts = []
+    mock_ctx = AsyncMock()
+    mock_ctx.pages = []
+    mock_ctx.new_page = AsyncMock(return_value=AsyncMock())
+    mock_browser.new_context = AsyncMock(return_value=mock_ctx)
+    mock_pw_instance.chromium.connect_over_cdp = AsyncMock(return_value=mock_browser)
+    mock_pw_cm = AsyncMock()
+    mock_pw_cm.__aenter__ = AsyncMock(return_value=mock_pw_instance)
+
+    with patch("work4me.controllers.browser.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec, \
+         patch("work4me.controllers.browser.asyncio.sleep", new_callable=AsyncMock), \
+         patch.dict("sys.modules", {"playwright": MagicMock(), "playwright.async_api": MagicMock(async_playwright=lambda: mock_pw_cm)}):
+        await ctrl.launch()
+
+    cmd_args = mock_exec.call_args[0]
+    assert any("--profile-directory=Profile 1" in str(a) for a in cmd_args)

@@ -95,6 +95,8 @@ class DotoolInput:
 
     async def _run_ydotool(self, dotool_command: str) -> None:
         """Translate dotool command to ydotool equivalent."""
+        if self._ydotool_path is None:
+            return
         parts = dotool_command.split(maxsplit=1)
         action = parts[0]
         arg = parts[1] if len(parts) > 1 else ""

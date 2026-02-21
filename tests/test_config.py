@@ -20,6 +20,8 @@ def test_browser_config_defaults():
     assert config.chromium_path == "google-chrome"
     assert config.debug_port == 9222
     assert config.enabled is True
+    assert config.user_data_dir == ""
+    assert config.profile_directory == ""
 
 
 def test_claude_config_no_budget_cap():

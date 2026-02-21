@@ -55,7 +55,7 @@ class VSCodeController:
         # Don't wait — VS Code runs independently
         logger.info("VS Code launched (pid=%d)", proc.pid)
 
-    async def send_command(self, command: str, timeout: float = 30.0, **kwargs: Any) -> dict:
+    async def send_command(self, command: str, timeout: float = 30.0, **kwargs: Any) -> dict[str, Any]:
         """Send a command to the VS Code extension and return the result."""
         if self._ws is None:
             raise ConnectionError("Not connected to VS Code bridge")
@@ -76,7 +76,8 @@ class VSCodeController:
                 if response.get("id") == expected_id:
                     if not response.get("success"):
                         raise RuntimeError(f"VS Code command failed: {response.get('error')}")
-                    return response.get("result", {})
+                    result: dict[str, Any] = response.get("result", {})
+                    return result
 
                 logger.warning(
                     "Response ID mismatch: expected %s, got %s — retrying recv",
@@ -101,14 +102,14 @@ class VSCodeController:
         """Save the active file."""
         await self.send_command("saveFile")
 
-    async def get_active_file(self) -> dict:
+    async def get_active_file(self) -> dict[str, Any]:
         """Get info about the currently active file."""
         return await self.send_command("getActiveFile")
 
     async def get_visible_text(self) -> str:
         """Get the currently visible text in the editor."""
         result = await self.send_command("getVisibleText")
-        return result.get("text", "")
+        return str(result.get("text", ""))
 
     async def run_terminal_command(self, cmd: str, name: str = "Work4Me") -> None:
         """Run a command in the VS Code integrated terminal."""
@@ -136,7 +137,7 @@ class VSCodeController:
             return False
         try:
             result = await self.send_command("ping")
-            return result.get("pong", False)
+            return bool(result.get("pong", False))
         except Exception:
             return False
 

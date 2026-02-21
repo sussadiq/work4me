@@ -11,6 +11,7 @@ import asyncio
 import logging
 import random
 import time
+from collections.abc import Awaitable, Callable
 
 from work4me.behavior.activity_monitor import ActivityMonitor, BehaviorAdjustment
 from work4me.behavior.typing import HumanTyper, TypedChar
@@ -52,8 +53,8 @@ class BehaviorEngine:
     async def type_text(
         self,
         text: str,
-        send_char_fn,
-        send_backspace_fn=None,
+        send_char_fn: Callable[[str], Awaitable[None]],
+        send_backspace_fn: Callable[[], Awaitable[None]] | None = None,
         *,
         is_code: bool = True,
     ) -> None:
@@ -96,8 +97,8 @@ class BehaviorEngine:
     async def type_command(
         self,
         command: str,
-        send_char_fn,
-        send_enter_fn,
+        send_char_fn: Callable[[str], Awaitable[None]],
+        send_enter_fn: Callable[[], Awaitable[None]],
     ) -> None:
         """Type a terminal command with human-like timing, then press Enter.
 

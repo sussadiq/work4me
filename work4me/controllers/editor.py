@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +25,12 @@ class EditorController:
 
     def __init__(self, nvim_socket: str = NVIM_SOCKET) -> None:
         self.nvim_socket = nvim_socket
-        self._nvim = None
+        self._nvim: Any = None
 
     async def connect(self) -> None:
         """Connect to Neovim RPC socket."""
         try:
-            import pynvim
+            import pynvim  # type: ignore[import-untyped]
 
             self._nvim = await asyncio.to_thread(
                 pynvim.attach, "socket", path=self.nvim_socket

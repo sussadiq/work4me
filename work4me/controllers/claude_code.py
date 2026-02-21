@@ -12,7 +12,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from work4me.config import ClaudeConfig
 
@@ -199,7 +199,7 @@ class ClaudeCodeManager:
                     seen_tool_ids.add(action_key)
                     yield action
 
-    def _extract_text_blocks(self, event: dict) -> list[str]:
+    def _extract_text_blocks(self, event: dict[str, Any]) -> list[str]:
         """Extract text content blocks from a stream-json event."""
         texts: list[str] = []
         event_type = event.get("type", "")
@@ -234,7 +234,7 @@ class ClaudeCodeManager:
 
         return texts
 
-    def _extract_actions(self, event: dict) -> list[CapturedAction]:
+    def _extract_actions(self, event: dict[str, Any]) -> list[CapturedAction]:
         """Extract CapturedActions from a stream-json event.
 
         Only captures from complete events (assistant messages with full input),
@@ -271,7 +271,7 @@ class ClaudeCodeManager:
 
         return actions
 
-    def _parse_tool_use(self, block: dict) -> CapturedAction | None:
+    def _parse_tool_use(self, block: dict[str, Any]) -> CapturedAction | None:
         """Parse a tool_use block into a CapturedAction."""
         tool_name = block.get("name", "")
         tool_input = block.get("input", {})

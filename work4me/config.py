@@ -6,6 +6,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,8 @@ class BrowserConfig:
     debug_port: int = 9222
     enabled: bool = True
     ozone_platform: str = "wayland"
+    user_data_dir: str = ""
+    profile_directory: str = ""
 
 
 @dataclass
@@ -128,7 +131,7 @@ def load_config(path: Path | None = None) -> Config:
     return config
 
 
-def _apply_toml(config: Config, data: dict) -> None:
+def _apply_toml(config: Config, data: dict[str, Any]) -> None:
     """Apply TOML dict onto Config dataclass (one level of nesting)."""
     for key, value in data.items():
         if isinstance(value, dict) and hasattr(config, key):
