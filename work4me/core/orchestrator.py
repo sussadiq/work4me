@@ -525,25 +525,22 @@ class Orchestrator:
         await self._vscode.new_claude_conversation()
         await asyncio.sleep(0.5)
 
-        # 2. Paste prompt via clipboard (avoids ydotool keycode bugs and focus issues)
+        # 2. Paste prompt + submit via clipboard (trailing \n triggers submit)
         await self._vscode.send_claude_prompt(prompt)
         await asyncio.sleep(0.3)
 
         # 3. Start file change monitoring
         await self._vscode.start_claude_watch()
 
-        # 4. Submit prompt via bridge (Enter within VS Code process)
-        await self._vscode.submit_claude_prompt()
-
-        # 5. Wait for Claude to finish (poll file change quiescence)
+        # 4. Wait for Claude to finish (poll file change quiescence)
         await self._wait_for_claude_completion(activity)
 
-        # 6. Stop monitoring and log results
+        # 5. Stop monitoring and log results
         watch_result = await self._vscode.stop_claude_watch()
         total_changes = watch_result.get("totalChanges", 0)
         logger.info("Claude sidebar completed: %d file changes", total_changes)
 
-        # 7. Review and accept diffs (skip if no changes detected)
+        # 6. Review and accept diffs (skip if no changes detected)
         if total_changes > 0:
             await self._review_and_accept_diffs()
         else:
@@ -552,7 +549,7 @@ class Orchestrator:
                 "(check prompt submission and permission configuration)"
             )
 
-        # 8. Open changed files for visual review
+        # 7. Open changed files for visual review
         for file_path in activity.files_involved[:3]:
             resolved = self._resolve_activity_path(file_path)
             if resolved is None or not Path(resolved).exists():

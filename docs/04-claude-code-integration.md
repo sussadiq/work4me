@@ -321,8 +321,7 @@ The work4me-bridge VS Code extension exposes these commands via WebSocket:
 | `newClaudeConversation` | Start a fresh conversation | `{newConversation}` |
 | `acceptDiff` | Accept the currently proposed diff | `{accepted}` |
 | `rejectDiff` | Reject the currently proposed diff | `{rejected}` |
-| `sendClaudePrompt` | Paste prompt via clipboard (focus + paste + restore) | `{prompted, length}` |
-| `submitClaudePrompt` | Focus input + press Enter via VS Code `type` command | `{submitted}` |
+| `sendClaudePrompt` | Paste prompt + submit via clipboard (focus + paste with trailing `\n` + restore) | `{prompted, length, submitted}` |
 | `configureClaudePermissions` | Set `claudeCode.initialPermissionMode` in VS Code settings | `{configured, mode}` |
 | `startClaudeWatch` | Start monitoring file changes | `{watching}` |
 | `stopClaudeWatch` | Stop monitoring, return summary | `{totalChanges, lastChangeTimestamp}` |
@@ -335,13 +334,12 @@ The work4me-bridge VS Code extension exposes these commands via WebSocket:
 1. Pre-check:          checkClaudeExtension → fail fast if not installed
 2. Open sidebar:       openClaudeCode (validates + activates extension, then opens)
 3. New conversation:   newClaudeConversation
-4. Paste prompt:       sendClaudePrompt (clipboard: save → write → focus → paste → restore)
+4. Paste prompt + submit: sendClaudePrompt (clipboard with trailing `\n` triggers submit)
 5. Start monitoring:   startClaudeWatch
-6. Submit:             submitClaudePrompt (focus + Enter via VS Code `type` command)
-7. Wait for completion: 15s grace period, then poll getClaudeStatus until idleMs > 5000
-8. Stop monitoring:    stopClaudeWatch → log file changes
-9. Review diffs:       if totalChanges > 0: 2-8s pause, then acceptDiff (95%) or rejectDiff (5%)
-10. Review files:      Open changed files in editor
+6. Wait for completion: 15s grace period, then poll getClaudeStatus until idleMs > 5000
+7. Stop monitoring:    stopClaudeWatch → log file changes
+8. Review diffs:       if totalChanges > 0: 2-8s pause, then acceptDiff (95%) or rejectDiff (5%)
+9. Review files:       Open changed files in editor
 ```
 
 ### Completion Detection
@@ -356,7 +354,7 @@ Since we can't introspect the Claude Code extension's internal state, completion
 
 ### Prompt Submission
 
-Prompts are pasted via the VS Code clipboard API (`sendClaudePrompt`), avoiding ydotool keycode translation bugs in webviews. Enter is sent via `vscode.commands.executeCommand('type', { text: '\n' })` (`submitClaudePrompt`), which operates within VS Code's process and reaches the Claude sidebar webview correctly.
+Prompts are pasted via the VS Code clipboard API (`sendClaudePrompt`) with a trailing `\n` appended to the clipboard text. The Claude sidebar's input field treats a pasted newline as a submit trigger, so paste and submission happen in a single operation. This avoids both ydotool keycode translation bugs in webviews and the limitation that VS Code's `type` command does not reach webview inputs.
 
 ### Permission Configuration
 

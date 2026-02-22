@@ -231,8 +231,7 @@ async def test_execute_coding_sidebar_mode():
     orch._vscode.open_claude_sidebar = AsyncMock(return_value={
         "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
     })
-    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42})
-    orch._vscode.submit_claude_prompt = AsyncMock(return_value={"submitted": True})
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42, "submitted": True})
     orch._vscode.is_claude_busy = AsyncMock(return_value=False)
     orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 3})
     orch._behavior = AsyncMock()
@@ -247,8 +246,6 @@ async def test_execute_coding_sidebar_mode():
     orch._vscode.open_claude_sidebar.assert_called_once()
     orch._vscode.new_claude_conversation.assert_called_once()
     orch._vscode.send_claude_prompt.assert_called_once()
-    # Submit via bridge (Enter within VS Code process)
-    orch._vscode.submit_claude_prompt.assert_called_once()
     orch._vscode.start_claude_watch.assert_called_once()
     orch._vscode.stop_claude_watch.assert_called_once()
 
@@ -499,8 +496,7 @@ async def test_coding_sidebar_focuses_vscode_window(orchestrator):
     orchestrator._vscode.open_claude_sidebar = AsyncMock(return_value={
         "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
     })
-    orchestrator._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42})
-    orchestrator._vscode.submit_claude_prompt = AsyncMock(return_value={"submitted": True})
+    orchestrator._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42, "submitted": True})
     orchestrator._vscode.is_claude_busy = AsyncMock(return_value=False)
     orchestrator._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
     orchestrator._behavior = AsyncMock()
@@ -831,8 +827,7 @@ async def test_sidebar_skips_diff_review_on_zero_changes():
     orch._vscode.open_claude_sidebar = AsyncMock(return_value={
         "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
     })
-    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42})
-    orch._vscode.submit_claude_prompt = AsyncMock(return_value={"submitted": True})
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42, "submitted": True})
     orch._vscode.is_claude_busy = AsyncMock(return_value=False)
     orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
     orch._behavior = AsyncMock()
@@ -867,8 +862,7 @@ async def test_sidebar_configures_permissions():
         return_value={"opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49"},
         side_effect=lambda *a, **kw: call_order.append("open_sidebar"),
     )
-    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42})
-    orch._vscode.submit_claude_prompt = AsyncMock(return_value={"submitted": True})
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42, "submitted": True})
     orch._vscode.is_claude_busy = AsyncMock(return_value=False)
     orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
     orch._behavior = AsyncMock()
@@ -898,8 +892,7 @@ async def test_sidebar_permission_config_failure_nonfatal():
     orch._vscode.open_claude_sidebar = AsyncMock(return_value={
         "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
     })
-    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42})
-    orch._vscode.submit_claude_prompt = AsyncMock(return_value={"submitted": True})
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42, "submitted": True})
     orch._vscode.is_claude_busy = AsyncMock(return_value=False)
     orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
     orch._behavior = AsyncMock()

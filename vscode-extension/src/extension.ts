@@ -317,21 +317,14 @@ async function dispatch(cmd: Command): Promise<unknown> {
 
       // Save current clipboard, write prompt, focus input, paste, restore
       const saved = await vscode.env.clipboard.readText();
-      await vscode.env.clipboard.writeText(prompt);
+      await vscode.env.clipboard.writeText(prompt + '\n');
       await vscode.commands.executeCommand('claude-vscode.focus');
       await new Promise(r => setTimeout(r, 200));
       await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
       await new Promise(r => setTimeout(r, 100));
       // Restore clipboard
       await vscode.env.clipboard.writeText(saved);
-      return { prompted: true, length: prompt.length };
-    }
-
-    case 'submitClaudePrompt': {
-      await vscode.commands.executeCommand('claude-vscode.focus');
-      await new Promise(r => setTimeout(r, 100));
-      await vscode.commands.executeCommand('type', { text: '\n' });
-      return { submitted: true };
+      return { prompted: true, length: prompt.length, submitted: true };
     }
 
     case 'configureClaudePermissions': {

@@ -212,10 +212,6 @@ class VSCodeController:
         """Send a prompt to Claude sidebar via clipboard paste."""
         return await self.send_command("sendClaudePrompt", prompt=prompt)
 
-    async def submit_claude_prompt(self) -> dict[str, Any]:
-        """Submit the Claude sidebar prompt (focus + Enter via extension)."""
-        return await self.send_command("submitClaudePrompt")
-
     async def configure_claude_permissions(self, mode: str = "acceptEdits") -> dict[str, Any]:
         """Configure Claude Code extension permission mode."""
         return await self.send_command("configureClaudePermissions", mode=mode)
