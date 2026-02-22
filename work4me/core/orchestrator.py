@@ -512,6 +512,12 @@ class Orchestrator:
         if not ext_status.get("active"):
             logger.warning("Claude Code extension installed but not yet active")
 
+        # 0. Configure permissions so Claude auto-accepts edits
+        try:
+            await self._vscode.configure_claude_permissions("acceptEdits")
+        except Exception as exc:
+            logger.warning("Could not configure Claude permissions: %s", exc)
+
         # 1. Open Claude Code sidebar and start a new conversation
         result = await self._vscode.open_claude_sidebar()
         logger.info("Claude sidebar opened (extension v%s)", result.get("extensionVersion", "?"))
@@ -519,20 +525,15 @@ class Orchestrator:
         await self._vscode.new_claude_conversation()
         await asyncio.sleep(0.5)
 
-        # 2. Focus input and type prompt with human-like timing
-        await self._vscode.focus_claude_input()
+        # 2. Paste prompt via clipboard (avoids ydotool keycode bugs and focus issues)
+        await self._vscode.send_claude_prompt(prompt)
         await asyncio.sleep(0.3)
-        await self._type_prompt_human_like(prompt)
 
         # 3. Start file change monitoring
         await self._vscode.start_claude_watch()
 
-        # 4. Press Enter to submit the prompt
-        if await self._input_sim.health_check():
-            await self._input_sim.type_key("Return")
-        else:
-            # Fallback: use bridge to type a newline
-            await self._vscode.type_text("\n")
+        # 4. Submit prompt via bridge (Enter within VS Code process)
+        await self._vscode.submit_claude_prompt()
 
         # 5. Wait for Claude to finish (poll file change quiescence)
         await self._wait_for_claude_completion(activity)
@@ -542,8 +543,14 @@ class Orchestrator:
         total_changes = watch_result.get("totalChanges", 0)
         logger.info("Claude sidebar completed: %d file changes", total_changes)
 
-        # 7. Review and accept diffs
-        await self._review_and_accept_diffs()
+        # 7. Review and accept diffs (skip if no changes detected)
+        if total_changes > 0:
+            await self._review_and_accept_diffs()
+        else:
+            logger.warning(
+                "No file changes detected — Claude may not have started "
+                "(check prompt submission and permission configuration)"
+            )
 
         # 8. Open changed files for visual review
         for file_path in activity.files_involved[:3]:
@@ -569,15 +576,20 @@ class Orchestrator:
 
     async def _wait_for_claude_completion(self, activity: Activity) -> None:
         """Poll file change status until Claude appears idle."""
+        grace_period = 15.0
         max_wait = min(activity.estimated_minutes * 60 * 0.8, 300)
         idle_threshold_ms = 5000
         poll_interval = 3.0
         elapsed = 0.0
 
         logger.info(
-            "Waiting for Claude completion (max %.0fs, idle threshold %dms)",
-            max_wait, idle_threshold_ms,
+            "Waiting for Claude completion (%.0fs grace, max %.0fs, idle threshold %dms)",
+            grace_period, max_wait, idle_threshold_ms,
         )
+
+        # Grace period — let Claude start before polling idle status
+        await self._behavior.idle_think(grace_period)
+        elapsed += grace_period
 
         while elapsed < max_wait:
             await self._behavior.idle_think(poll_interval)

@@ -60,6 +60,11 @@ For each activity, specify:
 6. search_queries: short web search terms (3-6 words each, e.g. "python asyncio websocket tutorial") — only for BROWSER/THINKING activities that need web research. Leave empty for CODING/TERMINAL/READING activities.
 7. dependencies: indices (as strings) of activities that must complete first
 
+Time allocation guidelines:
+- ~80% of estimated_minutes should be CODING and TERMINAL activities (implementation, testing, running commands)
+- ~20% of estimated_minutes should be BROWSER, READING, and THINKING activities (research, code review, planning)
+Prefer more and longer CODING activities. Only include BROWSER activities when the task genuinely requires web research.
+
 Return ONLY a JSON array. No explanation. The total estimated_minutes should equal approximately {target_minutes} (70% of budget — rest is breaks/transitions/thinking)."""
 
 
@@ -102,11 +107,17 @@ class TaskPlanner:
                 result = await self._claude.execute(
                     prompt=prompt,
                     working_dir=working_dir,
-                    max_turns=3,
+                    max_turns=self._config.plan_max_turns,
                 )
 
                 if result.error:
                     raise RuntimeError(f"Task decomposition failed: {result.error}")
+
+                if not result.raw_text.strip():
+                    logger.warning(
+                        "Claude Code returned empty text (exit_code=%d, actions=%d, session=%s)",
+                        result.exit_code, len(result.actions), result.session_id,
+                    )
 
                 return self._parse_plan(task_description, result.raw_text)
             except (RuntimeError, ValueError, json.JSONDecodeError) as exc:

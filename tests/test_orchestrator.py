@@ -218,7 +218,7 @@ async def test_default_mode_is_sidebar():
 
 @pytest.mark.asyncio
 async def test_execute_coding_sidebar_mode():
-    """Sidebar mode should call sidebar bridge methods."""
+    """Sidebar mode should use bridge commands for prompt input."""
     config = Config(mode="sidebar")
     orch = Orchestrator(config)
     activity = Activity(
@@ -227,24 +227,28 @@ async def test_execute_coding_sidebar_mode():
     )
     orch._vscode = AsyncMock()
     orch._vscode.check_claude_extension = AsyncMock(return_value={"installed": True, "active": True})
+    orch._vscode.configure_claude_permissions = AsyncMock(return_value={"configured": True, "mode": "acceptEdits"})
     orch._vscode.open_claude_sidebar = AsyncMock(return_value={
         "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
     })
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42})
+    orch._vscode.submit_claude_prompt = AsyncMock(return_value={"submitted": True})
     orch._vscode.is_claude_busy = AsyncMock(return_value=False)
     orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 3})
     orch._behavior = AsyncMock()
     orch._window_mgr = AsyncMock()
-    orch._input_sim = AsyncMock()
-    orch._input_sim.health_check = AsyncMock(return_value=True)
     orch._activity_monitor = MagicMock()
     orch.snapshot.working_dir = "/tmp"
 
     await orch._execute_coding_sidebar(activity, "/tmp")
 
     orch._vscode.check_claude_extension.assert_called_once()
+    orch._vscode.configure_claude_permissions.assert_called_once_with("acceptEdits")
     orch._vscode.open_claude_sidebar.assert_called_once()
     orch._vscode.new_claude_conversation.assert_called_once()
-    orch._vscode.focus_claude_input.assert_called_once()
+    orch._vscode.send_claude_prompt.assert_called_once()
+    # Submit via bridge (Enter within VS Code process)
+    orch._vscode.submit_claude_prompt.assert_called_once()
     orch._vscode.start_claude_watch.assert_called_once()
     orch._vscode.stop_claude_watch.assert_called_once()
 
@@ -491,15 +495,16 @@ async def test_coding_sidebar_focuses_vscode_window(orchestrator):
     orchestrator._mode = "sidebar"
     orchestrator._vscode = AsyncMock()
     orchestrator._vscode.check_claude_extension = AsyncMock(return_value={"installed": True, "active": True})
+    orchestrator._vscode.configure_claude_permissions = AsyncMock(return_value={"configured": True, "mode": "acceptEdits"})
     orchestrator._vscode.open_claude_sidebar = AsyncMock(return_value={
         "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
     })
+    orchestrator._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42})
+    orchestrator._vscode.submit_claude_prompt = AsyncMock(return_value={"submitted": True})
     orchestrator._vscode.is_claude_busy = AsyncMock(return_value=False)
     orchestrator._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
     orchestrator._behavior = AsyncMock()
     orchestrator._window_mgr = AsyncMock()
-    orchestrator._input_sim = AsyncMock()
-    orchestrator._input_sim.health_check = AsyncMock(return_value=True)
     orchestrator._activity_monitor = MagicMock()
 
     orchestrator.snapshot.working_dir = "/tmp"
@@ -804,3 +809,106 @@ async def test_research_with_browser_continues_after_timeout(orchestrator):
     assert "slow" in executed_queries
     assert "fast1" in executed_queries
     assert "fast2" in executed_queries
+
+
+# ------------------------------------------------------------------
+# Sidebar: permission configuration, zero-change skip, non-fatal failure
+# ------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sidebar_skips_diff_review_on_zero_changes():
+    """When Claude produces 0 file changes, diff review should be skipped."""
+    config = Config(mode="sidebar")
+    orch = Orchestrator(config)
+    activity = Activity(
+        ActivityKind.CODING, "Write auth", 20,
+        ["src/auth.ts"], [], [], [],
+    )
+    orch._vscode = AsyncMock()
+    orch._vscode.check_claude_extension = AsyncMock(return_value={"installed": True, "active": True})
+    orch._vscode.configure_claude_permissions = AsyncMock(return_value={"configured": True, "mode": "acceptEdits"})
+    orch._vscode.open_claude_sidebar = AsyncMock(return_value={
+        "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
+    })
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42})
+    orch._vscode.submit_claude_prompt = AsyncMock(return_value={"submitted": True})
+    orch._vscode.is_claude_busy = AsyncMock(return_value=False)
+    orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
+    orch._behavior = AsyncMock()
+    orch._window_mgr = AsyncMock()
+    orch._activity_monitor = MagicMock()
+    orch.snapshot.working_dir = "/tmp"
+
+    await orch._execute_coding_sidebar(activity, "/tmp")
+
+    # accept_diff should NOT be called when totalChanges is 0
+    orch._vscode.accept_diff.assert_not_called()
+    orch._vscode.reject_diff.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sidebar_configures_permissions():
+    """configure_claude_permissions('acceptEdits') should be called before open_claude_sidebar."""
+    config = Config(mode="sidebar")
+    orch = Orchestrator(config)
+    activity = Activity(
+        ActivityKind.CODING, "Write auth", 20,
+        ["src/auth.ts"], [], [], [],
+    )
+    call_order = []
+    orch._vscode = AsyncMock()
+    orch._vscode.check_claude_extension = AsyncMock(return_value={"installed": True, "active": True})
+    orch._vscode.configure_claude_permissions = AsyncMock(
+        return_value={"configured": True, "mode": "acceptEdits"},
+        side_effect=lambda *a, **kw: call_order.append("configure_permissions"),
+    )
+    orch._vscode.open_claude_sidebar = AsyncMock(
+        return_value={"opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49"},
+        side_effect=lambda *a, **kw: call_order.append("open_sidebar"),
+    )
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42})
+    orch._vscode.submit_claude_prompt = AsyncMock(return_value={"submitted": True})
+    orch._vscode.is_claude_busy = AsyncMock(return_value=False)
+    orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
+    orch._behavior = AsyncMock()
+    orch._window_mgr = AsyncMock()
+    orch._activity_monitor = MagicMock()
+    orch.snapshot.working_dir = "/tmp"
+
+    await orch._execute_coding_sidebar(activity, "/tmp")
+
+    orch._vscode.configure_claude_permissions.assert_called_once_with("acceptEdits")
+    # Permissions must be configured BEFORE opening sidebar
+    assert call_order.index("configure_permissions") < call_order.index("open_sidebar")
+
+
+@pytest.mark.asyncio
+async def test_sidebar_permission_config_failure_nonfatal():
+    """If configure_claude_permissions raises, sidebar should still proceed."""
+    config = Config(mode="sidebar")
+    orch = Orchestrator(config)
+    activity = Activity(
+        ActivityKind.CODING, "Write auth", 20,
+        ["src/auth.ts"], [], [], [],
+    )
+    orch._vscode = AsyncMock()
+    orch._vscode.check_claude_extension = AsyncMock(return_value={"installed": True, "active": True})
+    orch._vscode.configure_claude_permissions = AsyncMock(side_effect=RuntimeError("Setting not found"))
+    orch._vscode.open_claude_sidebar = AsyncMock(return_value={
+        "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
+    })
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42})
+    orch._vscode.submit_claude_prompt = AsyncMock(return_value={"submitted": True})
+    orch._vscode.is_claude_busy = AsyncMock(return_value=False)
+    orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
+    orch._behavior = AsyncMock()
+    orch._window_mgr = AsyncMock()
+    orch._activity_monitor = MagicMock()
+    orch.snapshot.working_dir = "/tmp"
+
+    # Should NOT raise — permission config failure is non-fatal
+    await orch._execute_coding_sidebar(activity, "/tmp")
+
+    # Sidebar should still have opened despite permission config failure
+    orch._vscode.open_claude_sidebar.assert_called_once()

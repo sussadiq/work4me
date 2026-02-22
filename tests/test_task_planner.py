@@ -2,7 +2,9 @@
 import json
 import pytest
 from unittest.mock import AsyncMock, patch
-from work4me.planning.task_planner import TaskPlanner, Activity, ActivityKind, TaskPlan
+from work4me.planning.task_planner import (
+    TaskPlanner, Activity, ActivityKind, TaskPlan, DECOMPOSITION_PROMPT,
+)
 from work4me.config import ClaudeConfig
 
 @pytest.fixture
@@ -63,12 +65,17 @@ async def test_decompose_parses_claude_json(planner):
     ])
     mock_result = type("R", (), {"raw_text": fake_json, "exit_code": 0, "error": None, "actions": []})()
 
-    with patch.object(planner._claude, "execute", new_callable=AsyncMock, return_value=mock_result):
+    with patch.object(planner._claude, "execute", new_callable=AsyncMock, return_value=mock_result) as mock_exec:
         plan = await planner.decompose("Build JWT auth", time_budget_hours=4, working_dir="/tmp")
 
     assert len(plan.activities) == 2
     assert plan.activities[0].kind == ActivityKind.CODING
     assert plan.activities[1].dependencies == ["0"]
+
+    # Verify max_turns uses config default (no disallowed_tools)
+    call_kwargs = mock_exec.call_args
+    assert call_kwargs.kwargs["max_turns"] == 10
+    assert "disallowed_tools" not in call_kwargs.kwargs
 
 
 @pytest.mark.asyncio
@@ -130,6 +137,13 @@ async def test_decompose_raises_after_all_retries_exhausted(planner):
             await planner.decompose("Test task", time_budget_hours=1, working_dir="/tmp")
 
 
+def test_decomposition_prompt_has_time_allocation_guidance():
+    """DECOMPOSITION_PROMPT should instruct 80% CODING/TERMINAL, 20% research."""
+    assert "80%" in DECOMPOSITION_PROMPT
+    assert "CODING and TERMINAL" in DECOMPOSITION_PROMPT
+    assert "BROWSER, READING, and THINKING" in DECOMPOSITION_PROMPT
+
+
 def test_planner_uses_planning_model():
     """TaskPlanner should create its ClaudeCodeManager with the planning_model."""
     config = ClaudeConfig(model="opus", planning_model="haiku")
@@ -138,8 +152,8 @@ def test_planner_uses_planning_model():
 
 
 def test_planner_uses_default_planning_model():
-    """TaskPlanner with default config should use haiku for planning."""
+    """TaskPlanner with default config should use sonnet for planning."""
     config = ClaudeConfig()
     planner = TaskPlanner(config)
-    assert planner._claude.config.model == "haiku"
+    assert planner._claude.config.model == "sonnet"
     assert config.model == "sonnet"  # Original config unchanged

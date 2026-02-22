@@ -45,7 +45,7 @@ async def test_cmd_start_uses_load_config(tmp_path):
             args = argparse.Namespace(
                 task="test", hours=1.0, budget=None, working_dir=".", model="sonnet",
                 max_budget=5.0, mode="manual", verbose=False,
-                config=str(toml_file),
+                config=str(toml_file), planning_model=None,
             )
             await cmd_start(args)
             mock_load.assert_called_once()
@@ -61,7 +61,7 @@ async def test_cmd_start_no_config_flag(tmp_path):
             args = argparse.Namespace(
                 task="test", hours=1.0, budget=None, working_dir=".", model="sonnet",
                 max_budget=5.0, mode="manual", verbose=False,
-                config=None,
+                config=None, planning_model=None,
             )
             await cmd_start(args)
             mock_load.assert_called_once_with(None)

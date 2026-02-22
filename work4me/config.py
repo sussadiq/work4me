@@ -57,11 +57,12 @@ class MicroPauseConfig:
 class ClaudeConfig:
     cli_path: str = "claude"
     model: str = "sonnet"
-    planning_model: str = "haiku"  # Cheaper model for task decomposition
+    planning_model: str = "sonnet"  # Model for task decomposition
     max_turns: int = 15
     max_budget_usd: float = 0.0  # 0 = unlimited (Max plan)
     dangerously_skip_permissions: bool = True
     extra_args: list[str] = field(default_factory=list)
+    plan_max_turns: int = 10
     plan_max_retries: int = 3
     plan_retry_base_delay: float = 2.0
 
@@ -112,6 +113,14 @@ class BrowserConfig:
 
 
 @dataclass
+class AuthConfig:
+    secret_key: str = ""  # Must be set before use; empty means auth disabled
+    algorithm: str = "HS256"
+    token_expiry_seconds: int = 3600  # 1 hour
+    issuer: str = "work4me"
+
+
+@dataclass
 class Config:
     typing: TypingConfig = field(default_factory=TypingConfig)
     activity: ActivityConfig = field(default_factory=ActivityConfig)
@@ -121,6 +130,7 @@ class Config:
     vscode: VSCodeConfig = field(default_factory=VSCodeConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     micro_pause: MicroPauseConfig = field(default_factory=MicroPauseConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
 
     mode: str = "sidebar"  # "sidebar" or "manual"
     default_hours: float = 4.0

@@ -248,14 +248,16 @@ if proc.returncode != 0:
 Work4Me supports separate models for task planning and coding:
 
 - **`claude.model`** (default: `sonnet`) — used by the main `ClaudeCodeManager` for coding activities
-- **`claude.planning_model`** (default: `haiku`) — used by `TaskPlanner` for task decomposition
+- **`claude.planning_model`** (default: `sonnet`) — used by `TaskPlanner` for task decomposition
+
+The planning invocation uses `--disallowedTools` to prevent Claude from exploring the codebase (Edit, Bash, Read, etc.) instead of returning a JSON plan. Without this, Claude may spend all `max_turns` on tool calls and return empty text. The planner also sets `max_turns=1` as an additional safeguard.
 
 This split saves costs since planning/decomposition doesn't need a powerful model. Configure via TOML:
 
 ```toml
 [claude]
 model = "sonnet"           # For coding
-planning_model = "haiku"   # For task decomposition
+planning_model = "sonnet"  # For task decomposition (can use "haiku" to save costs)
 ```
 
 Or via CLI flags:
@@ -319,6 +321,9 @@ The work4me-bridge VS Code extension exposes these commands via WebSocket:
 | `newClaudeConversation` | Start a fresh conversation | `{newConversation}` |
 | `acceptDiff` | Accept the currently proposed diff | `{accepted}` |
 | `rejectDiff` | Reject the currently proposed diff | `{rejected}` |
+| `sendClaudePrompt` | Paste prompt via clipboard (focus + paste + restore) | `{prompted, length}` |
+| `submitClaudePrompt` | Focus input + press Enter via VS Code `type` command | `{submitted}` |
+| `configureClaudePermissions` | Set `claudeCode.initialPermissionMode` in VS Code settings | `{configured, mode}` |
 | `startClaudeWatch` | Start monitoring file changes | `{watching}` |
 | `stopClaudeWatch` | Stop monitoring, return summary | `{totalChanges, lastChangeTimestamp}` |
 | `getClaudeStatus` | Get current activity status | `{fileChanges, lastChangeTimestamp, idleMs}` |
@@ -326,30 +331,36 @@ The work4me-bridge VS Code extension exposes these commands via WebSocket:
 ### Sidebar Interaction Flow
 
 ```
-1. Pre-check:           checkClaudeExtension → fail fast if not installed
-2. Open sidebar:        openClaudeCode (validates + activates extension, then opens)
-3. New conversation:    newClaudeConversation
-4. Focus input:         focusClaudeInput
-5. Type prompt:         dotool keystrokes (human-like timing)
-6. Start monitoring:    startClaudeWatch
-7. Submit:              dotool "Return" key
-8. Wait for completion: poll getClaudeStatus until idleMs > 5000
-9. Stop monitoring:     stopClaudeWatch → log file changes
-10. Review diffs:       2-8s pause, then acceptDiff (95%) or rejectDiff (5%)
-11. Review files:       Open changed files in editor
+0. Configure perms:    configureClaudePermissions("acceptEdits") — non-fatal
+1. Pre-check:          checkClaudeExtension → fail fast if not installed
+2. Open sidebar:       openClaudeCode (validates + activates extension, then opens)
+3. New conversation:   newClaudeConversation
+4. Paste prompt:       sendClaudePrompt (clipboard: save → write → focus → paste → restore)
+5. Start monitoring:   startClaudeWatch
+6. Submit:             submitClaudePrompt (focus + Enter via VS Code `type` command)
+7. Wait for completion: 15s grace period, then poll getClaudeStatus until idleMs > 5000
+8. Stop monitoring:    stopClaudeWatch → log file changes
+9. Review diffs:       if totalChanges > 0: 2-8s pause, then acceptDiff (95%) or rejectDiff (5%)
+10. Review files:      Open changed files in editor
 ```
 
 ### Completion Detection
 
 Since we can't introspect the Claude Code extension's internal state, completion is detected via file change quiescence:
+- **Grace period:** 15 seconds of idle time before polling begins, allowing Claude to start processing
 - **startClaudeWatch** resets counters and starts tracking `onDidChangeTextDocument` and `onDidCreateFiles` events
 - **getClaudeStatus** returns `idleMs` — time since last file change
 - When `idleMs > 5000` (no changes for 5 seconds), Claude is considered idle
 - Maximum wait timeout: `min(estimated_minutes * 60 * 0.8, 300)`
+- **Zero-change guard:** If `totalChanges == 0`, diff review is skipped and a warning is logged (Claude may not have started)
 
-### Input Simulation
+### Prompt Submission
 
-Prompts are typed using dotool/ydotool for real keyboard events (registered by time trackers). Falls back to the bridge `typeText` command if no input simulator is available.
+Prompts are pasted via the VS Code clipboard API (`sendClaudePrompt`), avoiding ydotool keycode translation bugs in webviews. Enter is sent via `vscode.commands.executeCommand('type', { text: '\n' })` (`submitClaudePrompt`), which operates within VS Code's process and reaches the Claude sidebar webview correctly.
+
+### Permission Configuration
+
+The `configureClaudePermissions` command sets `claudeCode.initialPermissionMode` in VS Code global settings before each sidebar conversation. Default mode is `"acceptEdits"`, which prevents "Ask before edits" prompts from blocking autonomous operation. Valid modes: `default`, `acceptEdits`, `plan`, `bypassPermissions`. Failure is non-fatal (older extension versions may not support this setting).
 
 ### Fallback Strategy
 

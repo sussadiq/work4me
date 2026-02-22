@@ -85,17 +85,22 @@ def test_load_config_partial_toml(tmp_path):
 
 def test_claude_config_planning_model_default():
     config = ClaudeConfig()
-    assert config.planning_model == "haiku"
+    assert config.planning_model == "sonnet"
 
 
 def test_claude_config_planning_model_from_toml(tmp_path):
     toml_file = tmp_path / "config.toml"
     toml_file.write_text("""
 [claude]
-planning_model = "sonnet"
+planning_model = "haiku"
 """)
     config = load_config(toml_file)
-    assert config.claude.planning_model == "sonnet"
+    assert config.claude.planning_model == "haiku"
+
+
+def test_claude_config_plan_max_turns_default():
+    config = ClaudeConfig()
+    assert config.plan_max_turns == 10
 
 
 def test_claude_config_retry_defaults():

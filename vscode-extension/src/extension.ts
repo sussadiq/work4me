@@ -311,6 +311,48 @@ async function dispatch(cmd: Command): Promise<unknown> {
       return { installed: !!ext, active: ext?.isActive ?? false };
     }
 
+    case 'sendClaudePrompt': {
+      const prompt = cmd.prompt as string;
+      if (!prompt) throw new Error('prompt is required');
+
+      // Save current clipboard, write prompt, focus input, paste, restore
+      const saved = await vscode.env.clipboard.readText();
+      await vscode.env.clipboard.writeText(prompt);
+      await vscode.commands.executeCommand('claude-vscode.focus');
+      await new Promise(r => setTimeout(r, 200));
+      await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+      await new Promise(r => setTimeout(r, 100));
+      // Restore clipboard
+      await vscode.env.clipboard.writeText(saved);
+      return { prompted: true, length: prompt.length };
+    }
+
+    case 'submitClaudePrompt': {
+      await vscode.commands.executeCommand('claude-vscode.focus');
+      await new Promise(r => setTimeout(r, 100));
+      await vscode.commands.executeCommand('type', { text: '\n' });
+      return { submitted: true };
+    }
+
+    case 'configureClaudePermissions': {
+      const mode = (cmd.mode as string) || 'acceptEdits';
+      const validModes = ['default', 'acceptEdits', 'plan', 'bypassPermissions'];
+      if (!validModes.includes(mode)) {
+        throw new Error(`Invalid permission mode: ${mode}. Valid: ${validModes.join(', ')}`);
+      }
+      await vscode.workspace.getConfiguration('claudeCode').update(
+        'initialPermissionMode', mode, vscode.ConfigurationTarget.Global
+      );
+      log(`Configured Claude permission mode: ${mode}`);
+      return { configured: true, mode };
+    }
+
+    case 'listCommands': {
+      const all = await vscode.commands.getCommands(true);
+      const filtered = all.filter(c => c.includes(cmd.filter as string || 'claude'));
+      return { commands: filtered };
+    }
+
     case 'startClaudeWatch': {
       fileChangeCount = 0;
       lastFileChangeTime = Date.now();

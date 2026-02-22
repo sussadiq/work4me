@@ -66,6 +66,7 @@ class ClaudeCodeManager:
         resume_session: str | None = None,
         max_turns: int | None = None,
         max_budget: float | None = None,
+        disallowed_tools: list[str] | None = None,
     ) -> list[str]:
         cmd = [self.config.cli_path]
 
@@ -87,6 +88,10 @@ class ClaudeCodeManager:
 
         cmd.extend(["--model", self.config.model])
 
+        if disallowed_tools:
+            for tool in disallowed_tools:
+                cmd.extend(["--disallowedTools", tool])
+
         cmd.extend(self.config.extra_args)
 
         return cmd
@@ -99,6 +104,7 @@ class ClaudeCodeManager:
         resume_session: str | None = None,
         max_turns: int | None = None,
         max_budget: float | None = None,
+        disallowed_tools: list[str] | None = None,
     ) -> SessionResult:
         """Run Claude Code and collect all actions.
 
@@ -110,6 +116,7 @@ class ClaudeCodeManager:
             resume_session=resume_session,
             max_turns=max_turns,
             max_budget=max_budget,
+            disallowed_tools=disallowed_tools,
         )
 
         logger.info("Spawning Claude Code: %s", " ".join(cmd[:6]) + " ...")
@@ -217,6 +224,7 @@ class ClaudeCodeManager:
                 logger.debug("Non-JSON line from Claude: %s", line[:100])
                 continue
 
+            logger.debug("Stream event type: %s", event.get("type", "unknown"))
             self._collected_texts.extend(self._extract_text_blocks(event))
 
             for action in self._extract_actions(event):
@@ -258,6 +266,14 @@ class ClaudeCodeManager:
                         text = block.get("text", "")
                         if text:
                             texts.append(text)
+
+        elif event_type == "stream_event":
+            event_data = event.get("event", {})
+            delta = event_data.get("delta", {})
+            if delta.get("type") == "text_delta":
+                text = delta.get("text", "")
+                if text:
+                    texts.append(text)
 
         return texts
 

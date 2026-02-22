@@ -73,8 +73,22 @@ class DotoolInput:
         await self._run_dotool(f"click {button}")
 
     async def health_check(self) -> bool:
-        """Check if dotool/ydotool is available."""
-        return self._dotool_path is not None or self._ydotool_path is not None
+        """Check if dotool/ydotool is available and functional."""
+        if self._dotool_path:
+            return True  # dotool doesn't need a daemon
+        if not self._ydotool_path:
+            return False
+        # Verify ydotoold daemon is reachable by running a no-op type
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self._ydotool_path, "type", "--key-delay", "0", "--", "",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            return b"ydotoold backend unavailable" not in stderr
+        except Exception:
+            return False
 
     async def _run_dotool(self, command: str) -> None:
         """Execute a dotool command by piping to stdin."""

@@ -208,6 +208,18 @@ class VSCodeController:
         """Get current Claude Code activity status."""
         return await self.send_command("getClaudeStatus")
 
+    async def send_claude_prompt(self, prompt: str) -> dict[str, Any]:
+        """Send a prompt to Claude sidebar via clipboard paste."""
+        return await self.send_command("sendClaudePrompt", prompt=prompt)
+
+    async def submit_claude_prompt(self) -> dict[str, Any]:
+        """Submit the Claude sidebar prompt (focus + Enter via extension)."""
+        return await self.send_command("submitClaudePrompt")
+
+    async def configure_claude_permissions(self, mode: str = "acceptEdits") -> dict[str, Any]:
+        """Configure Claude Code extension permission mode."""
+        return await self.send_command("configureClaudePermissions", mode=mode)
+
     async def is_claude_busy(self, idle_threshold_ms: int = 5000) -> bool:
         """Check if Claude Code is still actively making changes."""
         status = await self.get_claude_status()

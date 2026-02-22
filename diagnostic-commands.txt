@@ -1,0 +1,11 @@
+# Test 1: Basic text capture (baseline)
+claude -p "Return exactly: hello world" --output-format stream-json --verbose --max-turns 1 --model sonnet 2>/dev/null
+
+# Test 2: With --disallowedTools (our current fix)
+claude -p "Return exactly: hello world" --output-format stream-json --verbose --disallowedTools Edit --disallowedTools Bash --disallowedTools Write --disallowedTools Read --disallowedTools Glob --disallowedTools Grep --max-turns 1 --model sonnet 2>/dev/null
+
+# Test 3: Planning-like prompt with tools allowed and more turns
+claude -p 'You are a senior software engineer. Return ONLY a JSON array with 2 items. Each item has keys: kind, description, estimated_minutes. No explanation, just JSON.' --output-format stream-json --verbose --max-turns 5 --model sonnet 2>/dev/null
+
+# Test 4: Single flag with comma-separated values
+claude -p "Return exactly: hello world" --output-format stream-json --verbose --disallowedTools "Edit,Bash,Write,Read,Glob,Grep" --max-turns 1 --model sonnet 2>/dev/null

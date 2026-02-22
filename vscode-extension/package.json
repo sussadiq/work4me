@@ -2,7 +2,7 @@
   "name": "work4me-bridge",
   "displayName": "Work4Me Bridge",
   "description": "WebSocket bridge for Work4Me desktop agent",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "publisher": "work4me",
   "license": "MIT",
   "engines": { "vscode": "^1.74.0" },

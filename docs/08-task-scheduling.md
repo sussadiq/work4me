@@ -119,13 +119,16 @@ Activities are assigned to sessions based on:
 
 ```
 Total budget: 240 min (4 hours) — single continuous session
-├── Coding: ~60 min (25%)
-├── Reading code: ~36 min (15%)
-├── Terminal: ~24 min (10%)
-├── Browser: ~29 min (12%)
-├── Thinking/idle: ~48 min (20%)
+Target: ~80% CODING/TERMINAL, ~20% BROWSER/READING/THINKING
+├── Coding: ~110 min (46%)
+├── Terminal: ~34 min (14%)
+├── Reading code: ~19 min (8%)
+├── Browser: ~14 min (6%)
+├── Thinking/idle: ~14 min (6%)
 ├── Transitions: ~19 min (8%)
 └── Micro-pauses: ~24 min (10%)
+Note: Only 70% of budget (~168 min) is allocated to activities;
+the rest covers transitions, micro-pauses, and organic idle time.
 ```
 
 ---

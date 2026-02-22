@@ -311,6 +311,27 @@ def test_build_command_max_budget():
     assert cmd[idx + 1] == "2.5"
 
 
+def test_build_command_with_disallowed_tools():
+    """--disallowedTools flags should appear for each tool in the list."""
+    mgr = ClaudeCodeManager(ClaudeConfig())
+    cmd = mgr._build_command("test", disallowed_tools=["Edit", "Bash", "Write"])
+    pairs = []
+    for i, token in enumerate(cmd):
+        if token == "--disallowedTools":
+            pairs.append(cmd[i + 1])
+    assert pairs == ["Edit", "Bash", "Write"]
+
+
+def test_build_command_without_disallowed_tools():
+    """No --disallowedTools when param is None or empty."""
+    mgr = ClaudeCodeManager(ClaudeConfig())
+    cmd_none = mgr._build_command("test", disallowed_tools=None)
+    assert "--disallowedTools" not in cmd_none
+
+    cmd_empty = mgr._build_command("test", disallowed_tools=[])
+    assert "--disallowedTools" not in cmd_empty
+
+
 # --- Tests for stream buffer limit and oversized line recovery ---
 
 
@@ -371,3 +392,87 @@ async def test_parse_stream_recovers_from_oversized_line():
     assert actions == []
     # Verify the oversized data was drained
     reader.read.assert_called_once_with(100000)
+
+
+# --- Tests for stream_event (verbose mode text extraction) ---
+
+
+def test_raw_text_captured_from_stream_event():
+    """stream_event with text_delta should produce text."""
+    mgr = ClaudeCodeManager(ClaudeConfig())
+    event = {
+        "type": "stream_event",
+        "event": {
+            "delta": {
+                "type": "text_delta",
+                "text": "Here is the plan",
+            }
+        },
+    }
+    texts = mgr._extract_text_blocks(event)
+    assert len(texts) == 1
+    assert texts[0] == "Here is the plan"
+
+
+def test_raw_text_ignores_non_text_stream_events():
+    """stream_event without text_delta should produce no text."""
+    mgr = ClaudeCodeManager(ClaudeConfig())
+    # Delta with a different type (e.g. input_json_delta)
+    event_input_delta = {
+        "type": "stream_event",
+        "event": {
+            "delta": {
+                "type": "input_json_delta",
+                "partial_json": '{"file_path": "x.py"}',
+            }
+        },
+    }
+    assert mgr._extract_text_blocks(event_input_delta) == []
+
+    # stream_event with no delta at all
+    event_no_delta = {
+        "type": "stream_event",
+        "event": {"type": "content_block_start"},
+    }
+    assert mgr._extract_text_blocks(event_no_delta) == []
+
+    # stream_event with empty text
+    event_empty = {
+        "type": "stream_event",
+        "event": {
+            "delta": {
+                "type": "text_delta",
+                "text": "",
+            }
+        },
+    }
+    assert mgr._extract_text_blocks(event_empty) == []
+
+
+@pytest.mark.asyncio
+async def test_parse_stream_captures_stream_events():
+    """Integration: stream_event lines should populate _collected_texts."""
+    import json
+
+    mgr = ClaudeCodeManager(ClaudeConfig())
+
+    events = [
+        {"type": "system", "data": "init"},
+        {"type": "stream_event", "event": {"delta": {"type": "text_delta", "text": "Hello "}}},
+        {"type": "stream_event", "event": {"delta": {"type": "text_delta", "text": "world"}}},
+        {"type": "stream_event", "event": {"delta": {"type": "input_json_delta", "partial_json": "{}"}}},
+        {"type": "result", "session_id": "s1", "result": "Final."},
+    ]
+
+    data = b"".join(json.dumps(e).encode() + b"\n" for e in events)
+    reader = asyncio.StreamReader()
+    reader.feed_data(data)
+    reader.feed_eof()
+
+    actions = [a async for a in mgr._parse_stream(reader)]
+    assert actions == []  # no tool_use in these events
+
+    raw_text = "\n".join(mgr._collected_texts)
+    assert "Hello " in raw_text
+    assert "world" in raw_text
+    assert "Final." in raw_text
