@@ -314,17 +314,19 @@ async function dispatch(cmd: Command): Promise<unknown> {
     case 'sendClaudePrompt': {
       const prompt = cmd.prompt as string;
       if (!prompt) throw new Error('prompt is required');
+      const useCtrlEnter = vscode.workspace.getConfiguration('claudeCode')
+        .get<boolean>('useCtrlEnterToSend', false);
 
-      // Save current clipboard, write prompt, focus input, paste, restore
+      // Save current clipboard, write prompt (no trailing \n), focus input, paste, restore
       const saved = await vscode.env.clipboard.readText();
-      await vscode.env.clipboard.writeText(prompt + '\n');
+      await vscode.env.clipboard.writeText(prompt);
       await vscode.commands.executeCommand('claude-vscode.focus');
       await new Promise(r => setTimeout(r, 200));
       await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
       await new Promise(r => setTimeout(r, 100));
       // Restore clipboard
       await vscode.env.clipboard.writeText(saved);
-      return { prompted: true, length: prompt.length, submitted: true };
+      return { prompted: true, length: prompt.length, submitted: false, useCtrlEnterToSend: useCtrlEnter };
     }
 
     case 'configureClaudePermissions': {

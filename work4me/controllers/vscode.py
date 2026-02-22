@@ -216,7 +216,7 @@ class VSCodeController:
         """Configure Claude Code extension permission mode."""
         return await self.send_command("configureClaudePermissions", mode=mode)
 
-    async def is_claude_busy(self, idle_threshold_ms: int = 5000) -> bool:
+    async def is_claude_busy(self, idle_threshold_ms: int = 30000) -> bool:
         """Check if Claude Code is still actively making changes."""
         status = await self.get_claude_status()
         return int(status.get("idleMs", idle_threshold_ms + 1)) < idle_threshold_ms

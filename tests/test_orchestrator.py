@@ -231,11 +231,15 @@ async def test_execute_coding_sidebar_mode():
     orch._vscode.open_claude_sidebar = AsyncMock(return_value={
         "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
     })
-    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42, "submitted": True})
-    orch._vscode.is_claude_busy = AsyncMock(return_value=False)
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={
+        "prompted": True, "length": 42, "submitted": False, "useCtrlEnterToSend": False,
+    })
+    orch._vscode.get_claude_status = AsyncMock(return_value={"idleMs": 40000, "fileChanges": 3})
     orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 3})
     orch._behavior = AsyncMock()
     orch._window_mgr = AsyncMock()
+    orch._input_sim = AsyncMock()
+    orch._input_sim.health_check = AsyncMock(return_value=True)
     orch._activity_monitor = MagicMock()
     orch.snapshot.working_dir = "/tmp"
 
@@ -246,6 +250,7 @@ async def test_execute_coding_sidebar_mode():
     orch._vscode.open_claude_sidebar.assert_called_once()
     orch._vscode.new_claude_conversation.assert_called_once()
     orch._vscode.send_claude_prompt.assert_called_once()
+    orch._input_sim.type_key.assert_called_once_with("Return")
     orch._vscode.start_claude_watch.assert_called_once()
     orch._vscode.stop_claude_watch.assert_called_once()
 
@@ -338,6 +343,7 @@ async def test_sidebar_precheck_not_installed_falls_back():
 async def test_wrap_up_commit_msg_is_shell_escaped(orchestrator):
     """Shell metacharacters in commit message must be escaped."""
     orchestrator._vscode = AsyncMock()
+    orchestrator._vscode.get_claude_status = AsyncMock(return_value={"idleMs": 60000})
 
     orchestrator.snapshot.task_description = 'foo"; echo pwned; "'
 
@@ -496,11 +502,15 @@ async def test_coding_sidebar_focuses_vscode_window(orchestrator):
     orchestrator._vscode.open_claude_sidebar = AsyncMock(return_value={
         "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
     })
-    orchestrator._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42, "submitted": True})
-    orchestrator._vscode.is_claude_busy = AsyncMock(return_value=False)
+    orchestrator._vscode.send_claude_prompt = AsyncMock(return_value={
+        "prompted": True, "length": 42, "submitted": False, "useCtrlEnterToSend": False,
+    })
+    orchestrator._vscode.get_claude_status = AsyncMock(return_value={"idleMs": 40000, "fileChanges": 1})
     orchestrator._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
     orchestrator._behavior = AsyncMock()
     orchestrator._window_mgr = AsyncMock()
+    orchestrator._input_sim = AsyncMock()
+    orchestrator._input_sim.health_check = AsyncMock(return_value=True)
     orchestrator._activity_monitor = MagicMock()
 
     orchestrator.snapshot.working_dir = "/tmp"
@@ -827,11 +837,15 @@ async def test_sidebar_skips_diff_review_on_zero_changes():
     orch._vscode.open_claude_sidebar = AsyncMock(return_value={
         "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
     })
-    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42, "submitted": True})
-    orch._vscode.is_claude_busy = AsyncMock(return_value=False)
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={
+        "prompted": True, "length": 42, "submitted": False, "useCtrlEnterToSend": False,
+    })
+    orch._vscode.get_claude_status = AsyncMock(return_value={"idleMs": 40000, "fileChanges": 1})
     orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
     orch._behavior = AsyncMock()
     orch._window_mgr = AsyncMock()
+    orch._input_sim = AsyncMock()
+    orch._input_sim.health_check = AsyncMock(return_value=True)
     orch._activity_monitor = MagicMock()
     orch.snapshot.working_dir = "/tmp"
 
@@ -862,11 +876,15 @@ async def test_sidebar_configures_permissions():
         return_value={"opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49"},
         side_effect=lambda *a, **kw: call_order.append("open_sidebar"),
     )
-    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42, "submitted": True})
-    orch._vscode.is_claude_busy = AsyncMock(return_value=False)
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={
+        "prompted": True, "length": 42, "submitted": False, "useCtrlEnterToSend": False,
+    })
+    orch._vscode.get_claude_status = AsyncMock(return_value={"idleMs": 40000, "fileChanges": 1})
     orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
     orch._behavior = AsyncMock()
     orch._window_mgr = AsyncMock()
+    orch._input_sim = AsyncMock()
+    orch._input_sim.health_check = AsyncMock(return_value=True)
     orch._activity_monitor = MagicMock()
     orch.snapshot.working_dir = "/tmp"
 
@@ -892,11 +910,15 @@ async def test_sidebar_permission_config_failure_nonfatal():
     orch._vscode.open_claude_sidebar = AsyncMock(return_value={
         "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
     })
-    orch._vscode.send_claude_prompt = AsyncMock(return_value={"prompted": True, "length": 42, "submitted": True})
-    orch._vscode.is_claude_busy = AsyncMock(return_value=False)
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={
+        "prompted": True, "length": 42, "submitted": False, "useCtrlEnterToSend": False,
+    })
+    orch._vscode.get_claude_status = AsyncMock(return_value={"idleMs": 40000, "fileChanges": 1})
     orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 0})
     orch._behavior = AsyncMock()
     orch._window_mgr = AsyncMock()
+    orch._input_sim = AsyncMock()
+    orch._input_sim.health_check = AsyncMock(return_value=True)
     orch._activity_monitor = MagicMock()
     orch.snapshot.working_dir = "/tmp"
 
@@ -905,3 +927,141 @@ async def test_sidebar_permission_config_failure_nonfatal():
 
     # Sidebar should still have opened despite permission config failure
     orch._vscode.open_claude_sidebar.assert_called_once()
+
+
+# ------------------------------------------------------------------
+# Sidebar: Enter key submission and completion detection
+# ------------------------------------------------------------------
+
+
+def _make_sidebar_orch(*, use_ctrl_enter: bool = False, input_sim_available: bool = True):
+    """Helper to build a sidebar orchestrator with standard mocks."""
+    config = Config(mode="sidebar")
+    orch = Orchestrator(config)
+    orch._vscode = AsyncMock()
+    orch._vscode.check_claude_extension = AsyncMock(return_value={"installed": True, "active": True})
+    orch._vscode.configure_claude_permissions = AsyncMock(return_value={"configured": True, "mode": "acceptEdits"})
+    orch._vscode.open_claude_sidebar = AsyncMock(return_value={
+        "opened": "claude-sidebar", "extensionActive": True, "extensionVersion": "2.1.49",
+    })
+    orch._vscode.send_claude_prompt = AsyncMock(return_value={
+        "prompted": True, "length": 42, "submitted": False,
+        "useCtrlEnterToSend": use_ctrl_enter,
+    })
+    orch._vscode.get_claude_status = AsyncMock(return_value={"idleMs": 40000, "fileChanges": 3})
+    orch._vscode.stop_claude_watch = AsyncMock(return_value={"totalChanges": 3})
+    orch._behavior = AsyncMock()
+    orch._window_mgr = AsyncMock()
+    orch._input_sim = AsyncMock()
+    orch._input_sim.health_check = AsyncMock(return_value=input_sim_available)
+    orch._activity_monitor = MagicMock()
+    orch.snapshot.working_dir = "/tmp"
+    return orch
+
+
+@pytest.mark.asyncio
+async def test_sidebar_submits_with_enter_key():
+    """When useCtrlEnterToSend=false, submit with Return key."""
+    orch = _make_sidebar_orch(use_ctrl_enter=False)
+    activity = Activity(ActivityKind.CODING, "Write auth", 20, [], [], [], [])
+
+    await orch._execute_coding_sidebar(activity, "/tmp")
+
+    orch._input_sim.type_key.assert_called_once_with("Return")
+
+
+@pytest.mark.asyncio
+async def test_sidebar_submits_with_ctrl_enter():
+    """When useCtrlEnterToSend=true, submit with ctrl+Return key."""
+    orch = _make_sidebar_orch(use_ctrl_enter=True)
+    activity = Activity(ActivityKind.CODING, "Write auth", 20, [], [], [], [])
+
+    await orch._execute_coding_sidebar(activity, "/tmp")
+
+    orch._input_sim.type_key.assert_called_once_with("ctrl+Return")
+
+
+@pytest.mark.asyncio
+async def test_sidebar_submit_warns_no_input_sim(caplog):
+    """When input sim is unavailable, log warning but don't crash."""
+    import logging
+    orch = _make_sidebar_orch(input_sim_available=False)
+    activity = Activity(ActivityKind.CODING, "Write auth", 20, [], [], [], [])
+
+    with caplog.at_level(logging.WARNING):
+        await orch._execute_coding_sidebar(activity, "/tmp")
+
+    # type_key should NOT be called when health_check returns False
+    orch._input_sim.type_key.assert_not_called()
+    assert any("No input sim available" in record.message for record in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_claude_requires_seen_change():
+    """Should not return early when fileChanges=0, even if idle long enough."""
+    config = Config(mode="sidebar")
+    orch = Orchestrator(config)
+    orch._behavior = AsyncMock()
+    orch._vscode = AsyncMock()
+
+    # idleMs is high but no file changes yet — should not return early
+    call_count = 0
+
+    async def status_no_changes():
+        nonlocal call_count
+        call_count += 1
+        return {"idleMs": 40000, "fileChanges": 0}
+
+    orch._vscode.get_claude_status = AsyncMock(side_effect=status_no_changes)
+
+    activity = Activity(ActivityKind.CODING, "Write auth", 1, [], [], [], [])
+    # max_wait = min(1 * 60 * 1.5, 900) = 90s, but poll_interval=5s
+    # This will time out since fileChanges never becomes > 0
+    await orch._wait_for_claude_completion(activity)
+
+    # Should have polled multiple times without returning early
+    assert call_count > 1
+
+
+@pytest.mark.asyncio
+async def test_wait_for_claude_returns_after_idle_with_changes():
+    """Should return after seeing file changes AND idle threshold met."""
+    config = Config(mode="sidebar")
+    orch = Orchestrator(config)
+    orch._behavior = AsyncMock()
+    orch._vscode = AsyncMock()
+
+    orch._vscode.get_claude_status = AsyncMock(
+        return_value={"idleMs": 40000, "fileChanges": 3},
+    )
+
+    activity = Activity(ActivityKind.CODING, "Write auth", 10, [], [], [], [])
+    await orch._wait_for_claude_completion(activity)
+
+    # Should have returned on first poll after grace period
+    assert orch._vscode.get_claude_status.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_wrap_up_waits_if_claude_active():
+    """_wrap_up should wait if Claude is still active (low idleMs)."""
+    config = Config(mode="sidebar")
+    orch = Orchestrator(config)
+    orch._vscode = AsyncMock()
+    orch.snapshot.task_description = "test task"
+
+    # First call: active (low idle), second call: idle (high idle)
+    orch._vscode.get_claude_status = AsyncMock(
+        side_effect=[
+            {"idleMs": 5000},   # Still active
+            {"idleMs": 35000},  # Now idle
+        ],
+    )
+
+    with patch("work4me.core.orchestrator.asyncio.sleep", new_callable=AsyncMock):
+        await orch._wrap_up("/tmp")
+
+    # Should have polled get_claude_status twice (active → idle)
+    assert orch._vscode.get_claude_status.call_count == 2
+    # Should have proceeded to git commands after Claude became idle
+    orch._vscode.run_terminal_command.assert_called()

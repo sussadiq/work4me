@@ -525,22 +525,32 @@ class Orchestrator:
         await self._vscode.new_claude_conversation()
         await asyncio.sleep(0.5)
 
-        # 2. Paste prompt + submit via clipboard (trailing \n triggers submit)
-        await self._vscode.send_claude_prompt(prompt)
+        # 2. Paste prompt via clipboard
+        result = await self._vscode.send_claude_prompt(prompt)
         await asyncio.sleep(0.3)
 
-        # 3. Start file change monitoring
+        # 3. Simulate Enter key to submit (pasted \n doesn't trigger submit in webviews)
+        use_ctrl_enter = result.get("useCtrlEnterToSend", False)
+        submit_key = "ctrl+Return" if use_ctrl_enter else "Return"
+        if await self._input_sim.health_check():
+            await self._input_sim.type_key(submit_key)
+            logger.info("Submitted prompt via %s key", submit_key)
+        else:
+            logger.warning("No input sim available — prompt pasted but not submitted")
+        await asyncio.sleep(0.5)
+
+        # 4. Start file change monitoring
         await self._vscode.start_claude_watch()
 
-        # 4. Wait for Claude to finish (poll file change quiescence)
+        # 5. Wait for Claude to finish (poll file change quiescence)
         await self._wait_for_claude_completion(activity)
 
-        # 5. Stop monitoring and log results
+        # 6. Stop monitoring and log results
         watch_result = await self._vscode.stop_claude_watch()
         total_changes = watch_result.get("totalChanges", 0)
         logger.info("Claude sidebar completed: %d file changes", total_changes)
 
-        # 6. Review and accept diffs (skip if no changes detected)
+        # 7. Review and accept diffs (skip if no changes detected)
         if total_changes > 0:
             await self._review_and_accept_diffs()
         else:
@@ -549,7 +559,7 @@ class Orchestrator:
                 "(check prompt submission and permission configuration)"
             )
 
-        # 7. Open changed files for visual review
+        # 8. Open changed files for visual review
         for file_path in activity.files_involved[:3]:
             resolved = self._resolve_activity_path(file_path)
             if resolved is None or not Path(resolved).exists():
@@ -572,11 +582,15 @@ class Orchestrator:
             await self._vscode.type_text(prompt)
 
     async def _wait_for_claude_completion(self, activity: Activity) -> None:
-        """Poll file change status until Claude appears idle."""
-        grace_period = 15.0
-        max_wait = min(activity.estimated_minutes * 60 * 0.8, 300)
-        idle_threshold_ms = 5000
-        poll_interval = 3.0
+        """Poll file change status until Claude appears idle.
+
+        Requires at least one file change before declaring idle, to avoid
+        false positives when Claude pauses for thinking (10-30+ seconds).
+        """
+        grace_period = 20.0
+        max_wait = min(activity.estimated_minutes * 60 * 1.5, 900)
+        idle_threshold_ms = 30000
+        poll_interval = 5.0
         elapsed = 0.0
 
         logger.info(
@@ -593,11 +607,16 @@ class Orchestrator:
             elapsed += poll_interval
 
             try:
-                busy = await self._vscode.is_claude_busy(
-                    idle_threshold_ms=idle_threshold_ms,
-                )
-                if not busy:
-                    logger.info("Claude appears idle after %.0fs", elapsed)
+                status = await self._vscode.get_claude_status()
+                idle_ms = int(status.get("idleMs", 0))
+                file_changes = int(status.get("fileChanges", 0))
+
+                # Must see at least one file change AND idle long enough
+                if file_changes > 0 and idle_ms > idle_threshold_ms:
+                    logger.info(
+                        "Claude appears idle after %.0fs (%d file changes, %dms idle)",
+                        elapsed, file_changes, idle_ms,
+                    )
                     return
             except Exception:
                 pass  # Connection hiccup, keep waiting
@@ -793,6 +812,30 @@ class Orchestrator:
     async def _wrap_up(self, working_dir: str) -> None:
         """Git commit and final cleanup."""
         logger.info("Wrapping up session...")
+
+        # Final check: wait for Claude to finish if still active
+        try:
+            max_final_wait = 60.0
+            poll_interval = 5.0
+            waited = 0.0
+            while waited < max_final_wait:
+                status = await self._vscode.get_claude_status()
+                idle_ms = int(status.get("idleMs", max_final_wait * 1000))
+                if idle_ms >= 30000:
+                    break
+                logger.info(
+                    "Claude still active (idle %dms), waiting before commit...",
+                    idle_ms,
+                )
+                await asyncio.sleep(poll_interval)
+                waited += poll_interval
+            else:
+                logger.warning(
+                    "Claude still active after %.0fs — proceeding with commit anyway",
+                    max_final_wait,
+                )
+        except Exception:
+            pass  # No VS Code connection — proceed with commit
 
         try:
             await self._vscode.show_terminal()

@@ -321,7 +321,7 @@ The work4me-bridge VS Code extension exposes these commands via WebSocket:
 | `newClaudeConversation` | Start a fresh conversation | `{newConversation}` |
 | `acceptDiff` | Accept the currently proposed diff | `{accepted}` |
 | `rejectDiff` | Reject the currently proposed diff | `{rejected}` |
-| `sendClaudePrompt` | Paste prompt + submit via clipboard (focus + paste with trailing `\n` + restore) | `{prompted, length, submitted}` |
+| `sendClaudePrompt` | Paste prompt via clipboard (focus + paste + restore); returns `useCtrlEnterToSend` so caller can simulate the submit key | `{prompted, length, submitted: false, useCtrlEnterToSend}` |
 | `configureClaudePermissions` | Set `claudeCode.initialPermissionMode` in VS Code settings | `{configured, mode}` |
 | `startClaudeWatch` | Start monitoring file changes | `{watching}` |
 | `stopClaudeWatch` | Stop monitoring, return summary | `{totalChanges, lastChangeTimestamp}` |
@@ -334,27 +334,30 @@ The work4me-bridge VS Code extension exposes these commands via WebSocket:
 1. Pre-check:          checkClaudeExtension → fail fast if not installed
 2. Open sidebar:       openClaudeCode (validates + activates extension, then opens)
 3. New conversation:   newClaudeConversation
-4. Paste prompt + submit: sendClaudePrompt (clipboard with trailing `\n` triggers submit)
-5. Start monitoring:   startClaudeWatch
-6. Wait for completion: 15s grace period, then poll getClaudeStatus until idleMs > 5000
-7. Stop monitoring:    stopClaudeWatch → log file changes
-8. Review diffs:       if totalChanges > 0: 2-8s pause, then acceptDiff (95%) or rejectDiff (5%)
-9. Review files:       Open changed files in editor
+4. Paste prompt:       sendClaudePrompt (clipboard paste, no trailing \n)
+5. Submit via key:     ydotool/dotool simulates Enter (or Ctrl+Enter if useCtrlEnterToSend)
+6. Start monitoring:   startClaudeWatch
+7. Wait for completion: 20s grace, then poll getClaudeStatus until fileChanges > 0 AND idleMs > 30000
+8. Stop monitoring:    stopClaudeWatch → log file changes
+9. Review diffs:       if totalChanges > 0: 2-8s pause, then acceptDiff (95%) or rejectDiff (5%)
+10. Review files:      Open changed files in editor
 ```
 
 ### Completion Detection
 
 Since we can't introspect the Claude Code extension's internal state, completion is detected via file change quiescence:
-- **Grace period:** 15 seconds of idle time before polling begins, allowing Claude to start processing
+- **Grace period:** 20 seconds of idle time before polling begins, allowing Claude to start processing
 - **startClaudeWatch** resets counters and starts tracking `onDidChangeTextDocument` and `onDidCreateFiles` events
-- **getClaudeStatus** returns `idleMs` — time since last file change
-- When `idleMs > 5000` (no changes for 5 seconds), Claude is considered idle
-- Maximum wait timeout: `min(estimated_minutes * 60 * 0.8, 300)`
+- **getClaudeStatus** returns `idleMs` (time since last file change) and `fileChanges` (total count)
+- **Must-see-change guard:** Claude is only considered idle when `fileChanges > 0` AND `idleMs > 30000` — this prevents false positives during Claude's thinking pauses (10-30+ seconds)
+- **Poll interval:** 5 seconds between status checks
+- **Maximum wait timeout:** `min(estimated_minutes * 60 * 1.5, 900)` — generous to avoid premature cutoff
 - **Zero-change guard:** If `totalChanges == 0`, diff review is skipped and a warning is logged (Claude may not have started)
+- **Wrap-up guard:** Before committing, `_wrap_up` polls `getClaudeStatus` one more time (up to 60s) to ensure Claude is truly idle
 
 ### Prompt Submission
 
-Prompts are pasted via the VS Code clipboard API (`sendClaudePrompt`) with a trailing `\n` appended to the clipboard text. The Claude sidebar's input field treats a pasted newline as a submit trigger, so paste and submission happen in a single operation. This avoids both ydotool keycode translation bugs in webviews and the limitation that VS Code's `type` command does not reach webview inputs.
+Prompts are pasted via the VS Code clipboard API (`sendClaudePrompt`) without a trailing `\n`. Pasted newlines in webviews are treated as literal text, not submit triggers, so submission requires a separate step: the Python orchestrator simulates a physical Enter key press (or Ctrl+Enter if `claudeCode.useCtrlEnterToSend` is enabled) using ydotool/dotool. The `sendClaudePrompt` response includes `useCtrlEnterToSend` so the orchestrator knows which key to press. This two-step approach (paste + key press) reliably submits prompts in the Claude sidebar webview.
 
 ### Permission Configuration
 
