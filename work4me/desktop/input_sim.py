@@ -19,6 +19,37 @@ from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
+# Mapping from dotool (X11-style) key names to ydotool v0.1.x (evdev-style) names.
+# ydotool uses KEY_* constants from linux/input-event-codes.h with the KEY_ prefix
+# stripped, case-insensitive.
+_DOTOOL_TO_YDOTOOL: dict[str, str] = {
+    "Return": "enter",
+    "BackSpace": "backspace",
+    "Escape": "esc",
+    "space": "space",
+    "Tab": "tab",
+    "Delete": "delete",
+    "Up": "up",
+    "Down": "down",
+    "Left": "left",
+    "Right": "right",
+    "Home": "home",
+    "End": "end",
+    "Page_Up": "pageup",
+    "Page_Down": "pagedown",
+    "Insert": "insert",
+    "F1": "F1", "F2": "F2", "F3": "F3", "F4": "F4",
+    "F5": "F5", "F6": "F6", "F7": "F7", "F8": "F8",
+    "F9": "F9", "F10": "F10", "F11": "F11", "F12": "F12",
+}
+
+_DOTOOL_TO_YDOTOOL_MODS: dict[str, str] = {
+    "ctrl": "ctrl",
+    "shift": "shift",
+    "alt": "alt",
+    "super": "leftmeta",
+}
+
 
 class InputMethod(Protocol):
     """Protocol for input simulation backends."""
@@ -107,6 +138,36 @@ class DotoolInput:
         else:
             logger.error("No input simulation tool available (dotool or ydotool)")
 
+    def _translate_key_to_ydotool(self, key_name: str) -> list[str]:
+        """Translate a dotool key name to ydotool v0.1.x evdev-style name.
+
+        ydotool v0.1.x accepts key names from linux/input-event-codes.h
+        (KEY_ prefix stripped, case-insensitive) joined with ``+`` for
+        combos, e.g. ``ctrl+enter``, ``alt+F4``.
+        """
+        parts = key_name.split("+")
+        base = parts[-1]
+        mod_names = parts[:-1]
+
+        # Translate modifier names
+        translated_mods: list[str] = []
+        for m in mod_names:
+            mapped = _DOTOOL_TO_YDOTOOL_MODS.get(m)
+            if mapped is None:
+                logger.warning("Unknown ydotool modifier '%s', passing key as-is", m)
+                return [key_name]
+            translated_mods.append(mapped)
+
+        # Translate base key name
+        translated_base = _DOTOOL_TO_YDOTOOL.get(base)
+        if translated_base is None:
+            logger.warning("Unknown ydotool key name for '%s', passing as-is", base)
+            translated_base = base
+
+        # Join as single combo string: e.g. "ctrl+enter"
+        combo_parts = translated_mods + [translated_base]
+        return ["+".join(combo_parts)]
+
     async def _run_ydotool(self, dotool_command: str) -> None:
         """Translate dotool command to ydotool equivalent."""
         if self._ydotool_path is None:
@@ -118,7 +179,8 @@ class DotoolInput:
         if action == "type":
             cmd = [self._ydotool_path, "type", "--", arg]
         elif action == "key":
-            cmd = [self._ydotool_path, "key", arg]
+            key_args = self._translate_key_to_ydotool(arg)
+            cmd = [self._ydotool_path, "key", *key_args]
         elif action == "mouseto":
             coords = arg.split()
             cmd = [self._ydotool_path, "mousemove", "--absolute", "-x", coords[0], "-y", coords[1]]

@@ -21,7 +21,9 @@ sudo usermod -aG uinput $USER
 
 **Commands:** `type` (text), `key` (press/release keycodes), `mousemove`, `click`, `mousemove_relative`
 
-**Known issues:** Uses numeric keycodes with explicit press/release notation. Types slowly compared to direct protocol tools. Cannot target specific windows.
+**Key translation:** ydotool v0.1.x accepts evdev key names from `linux/input-event-codes.h` (with `KEY_` prefix stripped, case-insensitive) combined with `+` for combos (e.g. `ctrl+enter`, `alt+F4`). These differ from dotool's X11-style names (e.g. `Return` vs `enter`, `BackSpace` vs `backspace`). `input_sim.py` handles this via `_translate_key_to_ydotool()`, which maps dotool key names to ydotool evdev names.
+
+**Known issues:** Types slowly compared to direct protocol tools. Cannot target specific windows.
 
 ### dotool (Universal — Better Syntax)
 
